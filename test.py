@@ -1,6 +1,5 @@
 #!env python3
 import tarfile
-import urllib.request
 import subprocess
 import time
 import gzip
@@ -12,6 +11,10 @@ import serial
 import json
 import getpass
 from os import path
+
+from rich.progress import track, Progress
+
+import downloader
 
 ser = None
 
@@ -44,7 +47,8 @@ CLOUD_INIT_DATA = {
                'shell': '/bin/bash',
                'plain_text_passwd': 'password',
                'ssh-authorized-keys': [
-                   open(f"{path.expanduser('~/.ssh/macos-virt.pub')}").read()]}],
+                   open(
+                       f"{path.expanduser('~/.ssh/macos-virt.pub')}").read()]}],
     'runcmd': [
         'apt remove -y irqbalance'],
     'network': {'version': 2,
@@ -88,18 +92,23 @@ runcmd.insert(0,
 CLOUD_INIT_DATA['runcmd'] = runcmd
 
 MB = 1024 * 1024
-"""urllib.request.urlretrieve(
-    "https://cloud-images.ubuntu.com/releases/focal/release/unpacked/ubuntu-20.04-server-cloudimg-amd64-vmlinuz-generic",
-    "kernel")
-urllib.request.urlretrieve(
-    "https://cloud-images.ubuntu.com/releases/focal/release/unpacked/ubuntu-20.04-server-cloudimg-amd64-initrd-generic",
-    "initrd")
-urllib.request.urlretrieve(
-    "https://cloud-images.ubuntu.com/releases/focal/release/ubuntu-20.04-server-cloudimg-amd64.tar.gz",
-    "image.tar.gz")"""
-tf = tarfile.open("image.tar.gz")
-tf.extractall()
-tf.close()
+
+downloader.download([{
+                         "from": "https://cloud-images.ubuntu.com/releases/focal/release/unpacked/ubuntu-20.04-server-cloudimg-amd64-vmlinuz-generic",
+                         "to": "./kernel"},
+                     {
+                         "from": "https://cloud-images.ubuntu.com/releases/focal/release/unpacked/ubuntu-20.04-server-cloudimg-amd64-initrd-generic",
+                         "to": "./initrd"},
+                     {
+                         "from": "https://cloud-images.ubuntu.com/releases/focal/release/ubuntu-20.04-server-cloudimg-amd64.tar.gz",
+                         "to": "./image.tar.gz"}])
+
+with Progress() as progress:
+    task = progress.add_task("Extracting Root Image", total=100, start=False)
+    tf = tarfile.open("image.tar.gz")
+    tf.extractall()
+    tf.close()
+
 
 MB_PAD = b"\0" * MB
 try:
@@ -112,13 +121,17 @@ except gzip.BadGzipFile:
     pass
 
 with open("boot.img", "wb") as f:
-    [f.write(MB_PAD) for x in range(256)]
+    for n in track(range(256), description="Creating Boot image..."):
+        f.write(MB_PAD)
+
 
 size = os.path.getsize("focal-server-cloudimg-amd64.img")
 
 chunks = int(((MB * 10000) - size) / MB)
 with open("focal-server-cloudimg-amd64.img", "ba") as f:
-    [f.write(MB_PAD) for x in range(chunks)]
+    for n in track(range(chunks), description="Expanding Root Image..."):
+        f.write(MB_PAD)
+
 
 iso = pycdlib.PyCdlib()
 iso.new(interchange_level=4,
