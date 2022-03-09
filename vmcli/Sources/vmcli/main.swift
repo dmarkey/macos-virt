@@ -19,10 +19,6 @@ enum SizeSuffix: UInt64, ExpressibleByArgument {
     GB = 1_000_000_000
   case GiB = 0x4000_0000
 }
-
-var origStdinTerm: termios? = nil
-var origStdoutTerm: termios? = nil
-
 var vm: VZVirtualMachine? = nil
 
 var stopRequested = false
@@ -46,17 +42,30 @@ sigintSrcHup.setEventHandler {
 }
 sigintSrcHup.resume()
 
-func resetTty() {
-  if origStdinTerm != nil {
-    tcsetattr(0, TCSANOW, &origStdinTerm!)
+var globalControlSymlink : String? = nil
+
+var globalConsoleSymlink : String? = nil
+
+var globalPidFile : String? = nil
+
+
+func cleanup_files(){
+      if globalControlSymlink != nil {
+          try? fileManager.removeItem(atPath: (globalControlSymlink)!)
+      }
+
+      if globalConsoleSymlink != nil {
+          try? fileManager.removeItem(atPath: (globalConsoleSymlink)!)
+
+      }
+      if globalPidFile != nil {
+          try? fileManager.removeItem(atPath: (globalPidFile)!)
+      }
+
   }
-  if origStdoutTerm != nil {
-    tcsetattr(1, TCSANOW, &origStdoutTerm!)
-  }
-}
 
 func quit(_ code: Int32) -> Never {
-  resetTty()
+  cleanup_files()
   return exit(code)
 }
 
@@ -80,32 +89,6 @@ func openFolder(path: String) throws -> VZDirectorySharingDeviceConfiguration {
   return vzDirShare
 }
 
-class OccurrenceCounter {
-  let pattern: Data
-  var i = 0
-  init(_ pattern: Data) {
-    self.pattern = pattern
-  }
-
-  func process(_ data: Data) -> Int {
-    if pattern.count == 0 {
-      return 0
-    }
-    var occurrences = 0
-    for byte in data {
-      if byte == pattern[i] {
-        i += 1
-        if i >= pattern.count {
-          occurrences += 1
-          i = 0
-        }
-      } else {
-        i = 0
-      }
-    }
-    return occurrences
-  }
-}
 
 class VMCLIDelegate: NSObject, VZVirtualMachineDelegate {
   func guestDidStop(_ virtualMachine: VZVirtualMachine) {
@@ -119,6 +102,8 @@ class VMCLIDelegate: NSObject, VZVirtualMachineDelegate {
 let delegate = VMCLIDelegate()
 
 let vmCfg = VZVirtualMachineConfiguration()
+
+let fileManager = FileManager()
 
 struct VMCLI: ParsableCommand {
   @Option(name: .shortAndLong, help: "CPU count")
@@ -180,7 +165,7 @@ struct VMCLI: ParsableCommand {
   @Option(help: "Escape Sequence, when using a tty")
   var escapeSequence: String = "q"
 
-  mutating func run() throws {
+  func run() throws {
     vmCfg.cpuCount = cpuCount
     vmCfg.memorySize = memorySize * memorySizeSuffix.rawValue
 
@@ -216,7 +201,9 @@ struct VMCLI: ParsableCommand {
       print("Failed to open pty")
       quit(1)
     }
-    let fileManager = FileManager()
+    globalPidFile = pidfile
+    globalConsoleSymlink = consoleSymlink
+    globalControlSymlink = controlSymlink
     if controlSymlink != nil {
       try? fileManager.createSymbolicLink(
         atPath: controlSymlink!, withDestinationPath: String(cString: ttyname(aslavecontrol)))
