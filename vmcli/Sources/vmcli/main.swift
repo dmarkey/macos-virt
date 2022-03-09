@@ -32,6 +32,7 @@ let signalMask = SIGPIPE | SIGINT | SIGTERM
 signal(signalMask, SIG_IGN)
 let sigintSrc = DispatchSource.makeSignalSource(signal: signalMask, queue: .main)
 sigintSrc.setEventHandler {
+  
   quit(1)
 }
 sigintSrc.resume()
@@ -209,15 +210,12 @@ struct VMCLI: ParsableCommand {
       print("Failed to open pty")
       quit(1)
     }
-    print(String(cString: ttyname(aslaveconsole)))
     var amastercontrol: Int32 = 0
     var aslavecontrol: Int32 = 0
     if openpty(&amastercontrol, &aslavecontrol, nil, nil, nil) == -1 {
       print("Failed to open pty")
       quit(1)
     }
-
-    print(String(cString: ttyname(aslavecontrol)))
     let fileManager = FileManager()
     if controlSymlink != nil {
       try? fileManager.createSymbolicLink(
@@ -252,7 +250,6 @@ struct VMCLI: ParsableCommand {
     NSWorkspace.shared.notificationCenter.addObserver(
       forName: NSWorkspace.didWakeNotification, object: nil, queue: nil,
       using: { _ in
-
         let timeUpdateMessage =
           [
             "message_type": "time_update",
@@ -262,11 +259,12 @@ struct VMCLI: ParsableCommand {
         do {
           var jsonData = try JSONSerialization.data(withJSONObject: timeUpdateMessage)
 
+          jsonData.append(13)
           jsonData.append(10)
 
           jsonData.withUnsafeBytes { rawBufferPointer in
             let rawPtr = rawBufferPointer.baseAddress!
-            write(amastercontrol, rawPtr, rawBufferPointer.count)
+            write(aslavecontrol, rawPtr, rawBufferPointer.count)
           }
           //do something with myStruct
         } catch {

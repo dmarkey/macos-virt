@@ -1,0 +1,6 @@
+[Unit]
+Description=Constantly Sync Time.
+[Service]
+ExecStart=/bin/python3 -u /root/test.py
+[Install]
+WantedBy=multi-user.target
