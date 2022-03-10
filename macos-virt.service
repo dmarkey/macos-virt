@@ -1,6 +1,6 @@
 [Unit]
-Description=Constantly Sync Time.
+Description=Macos-Virt Agent.
 [Service]
-ExecStart=/bin/python3 -u /root/test.py
+ExecStart=/bin/python3 -u /usr/sbin/macos-virt-service.py
 [Install]
 WantedBy=multi-user.target

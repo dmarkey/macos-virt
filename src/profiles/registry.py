@@ -11,10 +11,7 @@ class Registry:
     def get_distributions(self):
         return list(self.profiles.keys())
 
-    def get_versions_for(self, name):
-        return sorted(list(self.profiles.keys()))
-
-    def get_profile(self, name):
+    def get_profile(self, name) -> BaseProfile:
         return self.profiles[name]
 
 
