@@ -30,7 +30,7 @@ def stop(name="default", force=False):
 
 @app.command()
 def shell(name="default"):
-    return
+    Controller.shell(name)
 
 
 @app.command()

@@ -24,6 +24,8 @@ class BaseProfile:
     @classmethod
     def file_locations(cls):
         cache_directory = cls.profile_directory()
+        if not cls.required_files_exist():
+            cls.download_required_files()
         return (
             os.path.join(cache_directory, KERNAL_FILENAME),
             os.path.join(cache_directory, INITRD_FILENAME),
@@ -75,5 +77,8 @@ class BaseProfile:
     @classmethod
     def render_cloudinit_data(cls, username, ssh_key):
         raise NotImplementedError()
+
+    def get_boot_files_from_filesystem(self, filesystem):
+        pass
 
 

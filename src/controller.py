@@ -5,11 +5,13 @@ import pathlib
 import random
 import shutil
 import subprocess
+import tempfile
 import time
 from io import BytesIO
 from subprocess import check_output
 import pycdlib
 import serial
+import fs
 
 import xdg as xdg
 import json
@@ -18,8 +20,7 @@ import yaml
 from rich.progress import track
 
 from profiles.registry import registry
-from constants import (DISK_FILENAME, BOOT_DISK_FILENAME, CLOUDINIT_ISO_NAME,
-                       KERNAL_FILENAME, INITRD_FILENAME)
+from constants import (DISK_FILENAME, BOOT_DISK_FILENAME, CLOUDINIT_ISO_NAME)
 
 BASE_PATH = os.path.join(xdg.xdg_config_home(), "macos-virt/vms")
 
@@ -27,7 +28,7 @@ pathlib.Path(BASE_PATH).mkdir(parents=True, exist_ok=True)
 MB = 1024 * 1024
 
 KEY_PATH = os.path.expanduser("~/.ssh/macos-virt")
-KEY_PATH_PUBLIC = os.path.expanduser("~/.ssh/macos-virt")
+KEY_PATH_PUBLIC = os.path.expanduser("~/.ssh/macos-virt.pub")
 
 
 class DuplicateVMException(Exception):
@@ -38,7 +39,15 @@ class VMDoesntExist(Exception):
     pass
 
 
+class VMHasNoAssignedAddress(Exception):
+    pass
+
+
 class VMRunning(Exception):
+    pass
+
+
+class VMNotRunning(Exception):
     pass
 
 
@@ -56,12 +65,27 @@ class VMManager:
             open(os.path.join(vm_directory, "vm.json")))
         self.profile = registry.get_profile(self.configuration['profile'])
 
+    def is_provisioned(self):
+        return self.configuration.get("status") == "running"
+
+    def get_ip_address(self):
+        ip_address = self.configuration.get("ip_address", None)
+        if not ip_address:
+            raise VMHasNoAssignedAddress("VM has no assigned IP address")
+        return ip_address
+
     def file_locations(self):
         return (
             os.path.join(self.vm_directory, DISK_FILENAME),
             os.path.join(self.vm_directory, BOOT_DISK_FILENAME),
             os.path.join(self.vm_directory, CLOUDINIT_ISO_NAME)
         )
+
+    def shell(self):
+        ip_address = self.get_ip_address()
+        os.execl("/usr/bin/ssh", "/usr/bin/ssh",
+                 "-oStrictHostKeyChecking=no",
+                 "-i", KEY_PATH, ip_address)
 
     @staticmethod
     def get_ssh_public_key():
@@ -73,8 +97,10 @@ class VMManager:
     def start(self):
         if self.is_running():
             raise VMRunning(f"VM {self.name} is already running.")
-        if self.configuration['status'] == "uninitialized":
+        elif self.configuration['status'] == "uninitialized":
             self.provision()
+        elif self.configuration['status'] == "running":
+            self.boot_normally()
 
     def provision(self):
         vm_disk, vm_boot_disk, cloudinit_iso = self.file_locations()
@@ -121,9 +147,9 @@ class VMManager:
 
         subprocess.Popen(["vmcli",
                           "--pidfile=./pidfile",
-                          f"--kernel=./{kernel}",
+                          f"--kernel={kernel}",
                           "--cmdline=console=hvc0 root=/dev/vda",
-                          f"--initrd=./{initrd}",
+                          f"--initrd={initrd}",
                           f"--cdrom=./{CLOUDINIT_ISO_NAME}",
                           f"--disk={DISK_FILENAME}",
                           f"--disk={BOOT_DISK_FILENAME}",
@@ -137,14 +163,22 @@ class VMManager:
         ser = serial.Serial(os.path.join(self.vm_directory, "control"),
                             timeout=300)
         for x in range(3):
-            status = json.loads(ser.readline().decode())['status']
+            status = json.loads(ser.readline().decode())
             self.update_vm_status(status)
 
     def update_vm_status(self, status):
-        self.configuration['status'] = status
+        status_string = status['status']
+        self.configuration['status'] = status_string
+        if status_string == "running":
+            if "network_addresses" in status:
+                for address, netmask in status['network_addresses']:
+                    if "192.168.68" in address:
+                        self.configuration['ip_address'] = address
+
         with open(os.path.join(self.vm_directory, "vm.json"),
                   "w") as f:
             json.dump(self.configuration, f)
+        print(self.configuration)
 
     def is_running(self):
         try:
@@ -159,6 +193,23 @@ class VMManager:
         except FileNotFoundError:
             return False
 
+    def boot_normally(self):
+        vm_disk, vm_boot_disk, cloudinit_iso = self.file_locations()
+        boot_filesystem = fs.open_fs(f"fat://{vm_boot_disk}?read_only=true")
+        kernel = sorted([x for x in
+                         boot_filesystem.listdir("/")
+                         if x.startswith("vmlinuz")])[0]
+        initrd = sorted([x for x in boot_filesystem.listdir("/") if
+                         x.startswith("initrd")])[0]
+
+        kernel_file = boot_filesystem.readbytes(kernel)
+        initrd_file = boot_filesystem.readbytes(initrd)
+        with tempfile.NamedTemporaryFile(delete=True) as kernel:
+            kernel.write(kernel_file)
+            with tempfile.NamedTemporaryFile(delete=True) as initrd:
+                initrd.write(initrd_file)
+                self.boot_vm(kernel.name, initrd.name)
+
 
 class Controller:
 
@@ -169,22 +220,32 @@ class Controller:
 
     @classmethod
     def start(cls, profile, name, cpus, memory, disk_size, cloudinit):
+
         if name in cls.get_valid_vms():
+            vm_directory = get_vm_directory(name)
+            vm = VMManager(vm_directory)
+            if vm.is_provisioned():
+                vm.start()
+                return
+
             raise DuplicateVMException(f"VM {name} already exists")
+
         configuration = {
             "memory": memory,
             "cpus": cpus,
             "disk_size": disk_size,
             "profile": profile,
-            "mac_address": ':'.join('%02x' % random.randint(0, 255)
-                                    for x in range(6)),
+            "ip_address": None,
+            "mac_address": "52:54:00:%02x:%02x:%02x" % (
+                random.randint(0, 255),
+                random.randint(0, 255),
+                random.randint(0, 255),
+            ),
             "status": "uninitialized"
         }
-        vm_directory = get_vm_directory(name)
         with open(os.path.join(get_vm_directory(name), "vm.json"),
                   "w") as f:
             json.dump(configuration, f)
-        VMManager(vm_directory).start()
 
     @classmethod
     def delete(cls, name):
@@ -195,3 +256,12 @@ class Controller:
             raise VMRunning(f"VM {name} is running,"
                             f" please stop before deleting")
         shutil.rmtree(get_vm_directory(name))
+
+    @classmethod
+    def shell(cls, name):
+        if name not in cls.get_valid_vms():
+            raise VMDoesntExist(f"VM {name} doesnt exist")
+        vm = VMManager(get_vm_directory(name))
+        if not vm.is_running():
+            raise VMNotRunning(f"VM {name} is not running,")
+        vm.shell()
