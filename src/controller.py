@@ -220,9 +220,8 @@ class Controller:
 
     @classmethod
     def start(cls, profile, name, cpus, memory, disk_size, cloudinit):
-        vm_directory = get_vm_directory(name)
-        vm = VMManager(vm_directory)
         if name in cls.get_valid_vms():
+            vm_directory = get_vm_directory(name)
             vm = VMManager(vm_directory)
             if vm.is_provisioned():
                 vm.start()
@@ -246,6 +245,8 @@ class Controller:
             with open(os.path.join(get_vm_directory(name), "vm.json"),
                       "w") as f:
                 json.dump(configuration, f)
+            vm_directory = get_vm_directory(name)
+            vm = VMManager(vm_directory)
             vm.start()
 
     @classmethod
