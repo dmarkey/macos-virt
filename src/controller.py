@@ -220,32 +220,33 @@ class Controller:
 
     @classmethod
     def start(cls, profile, name, cpus, memory, disk_size, cloudinit):
-
+        vm_directory = get_vm_directory(name)
+        vm = VMManager(vm_directory)
         if name in cls.get_valid_vms():
-            vm_directory = get_vm_directory(name)
             vm = VMManager(vm_directory)
             if vm.is_provisioned():
                 vm.start()
                 return
 
             raise DuplicateVMException(f"VM {name} already exists")
-
-        configuration = {
-            "memory": memory,
-            "cpus": cpus,
-            "disk_size": disk_size,
-            "profile": profile,
-            "ip_address": None,
-            "mac_address": "52:54:00:%02x:%02x:%02x" % (
-                random.randint(0, 255),
-                random.randint(0, 255),
-                random.randint(0, 255),
-            ),
-            "status": "uninitialized"
-        }
-        with open(os.path.join(get_vm_directory(name), "vm.json"),
-                  "w") as f:
-            json.dump(configuration, f)
+        else:
+            configuration = {
+                "memory": memory,
+                "cpus": cpus,
+                "disk_size": disk_size,
+                "profile": profile,
+                "ip_address": None,
+                "mac_address": "52:54:00:%02x:%02x:%02x" % (
+                    random.randint(0, 255),
+                    random.randint(0, 255),
+                    random.randint(0, 255),
+                ),
+                "status": "uninitialized"
+            }
+            with open(os.path.join(get_vm_directory(name), "vm.json"),
+                      "w") as f:
+                json.dump(configuration, f)
+            vm.start()
 
     @classmethod
     def delete(cls, name):
