@@ -19,7 +19,7 @@ class Ubuntu2004(BaseProfile):
             progress.add_task("Extracting Root Image for Ubuntu", total=100,
                               start=False)
             tf = tarfile.open(disk_full_path)
-            tf.extractall()
+            tf.extractall(os.path.dirname(disk_full_path))
             tf.close()
             os.rename(f"focal-server-cloudimg-{PLATFORM}.img", disk_full_path)
 
