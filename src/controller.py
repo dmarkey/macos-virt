@@ -1,4 +1,5 @@
 import getpass
+import gzip
 import os
 import glob
 import pathlib
@@ -144,7 +145,14 @@ class VMManager:
         self.boot_vm(kernel, initrd)
 
     def boot_vm(self, kernel, initrd):
-
+        try:
+            kern = gzip.open(kernel)
+            uncompressed = kern.read()
+            kern.close()
+            with open(kernel, "wb") as f:
+                f.write(uncompressed)
+        except gzip.BadGzipFile:
+            pass
         subprocess.Popen(["vmcli",
                           "--pidfile=./pidfile",
                           f"--kernel={kernel}",

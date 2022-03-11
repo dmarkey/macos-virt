@@ -15,15 +15,6 @@ class Ubuntu2004(BaseProfile):
     @classmethod
     def process_downloaded_files(cls, cache_directory):
         disk_full_path = os.path.join(cache_directory, DISK_FILENAME)
-        try:
-            kernel_full_path = os.path.join(cache_directory, KERNAL_FILENAME)
-            kern = gzip.open(kernel_full_path)
-            uncompressed = kern.read()
-            kern.close()
-            with open(kernel_full_path, "wb") as f:
-                f.write(uncompressed)
-        except gzip.BadGzipFile:
-            pass
         with Progress() as progress:
             progress.add_task("Extracting Root Image for Ubuntu", total=100,
                               start=False)
@@ -34,19 +25,22 @@ class Ubuntu2004(BaseProfile):
 
     @classmethod
     def get_kernel_url(cls):
-        return f"https://cloud-images.ubuntu.com/releases/focal/release/" \
+        return f"https://cloud-images.ubuntu.com/" \
+               f"releases/focal/release-20220302/" \
                f"unpacked/" \
                f"ubuntu-20.04-server-cloudimg-{PLATFORM}-vmlinuz-generic"
 
     @classmethod
     def get_initrd_url(cls):
-        return f"https://cloud-images.ubuntu.com/releases/focal/release/" \
+        return f"https://cloud-images.ubuntu.com/" \
+               f"releases/focal/release-20220302/" \
                f"unpacked/" \
                f"ubuntu-20.04-server-cloudimg-{PLATFORM}-initrd-generic"
 
     @classmethod
     def get_disk_image_url(cls):
-        return f"https://cloud-images.ubuntu.com/releases/focal/release/" \
+        return f"https://cloud-images.ubuntu.com/" \
+               f"releases/focal/release-20220302/" \
                f"ubuntu-20.04-server-cloudimg-{PLATFORM}.tar.gz"
 
     @classmethod
