@@ -1,0 +1,14 @@
+appdirs==1.4.4
+click==8.0.4
+commonmark==0.9.1
+fs==2.4.15
+pycdlib==1.12.0
+pyfatfs==1.0.3
+Pygments==2.11.2
+pyserial==3.5
+pytz==2021.3
+PyYAML==6.0
+rich==12.0.0
+six==1.16.0
+typer==0.4.0
+xdg==5.1.1
