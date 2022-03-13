@@ -28,8 +28,8 @@ BASE_PATH = os.path.join(xdg.xdg_config_home(), "macos-virt/vms")
 pathlib.Path(BASE_PATH).mkdir(parents=True, exist_ok=True)
 MB = 1024 * 1024
 
-KEY_PATH = os.path.expanduser("~/.ssh/macos-virt")
-KEY_PATH_PUBLIC = os.path.expanduser("~/.ssh/macos-virt.pub")
+KEY_PATH = os.path.join(xdg.xdg_config_home(), "macos-virt/macos-virt-identity")
+KEY_PATH_PUBLIC = os.path.join(xdg.xdg_config_home(), "macos-virt/macos-virt-identity.pub")
 
 
 class DuplicateVMException(Exception):
@@ -156,7 +156,7 @@ class VMManager:
         subprocess.Popen(["vmcli",
                           "--pidfile=./pidfile",
                           f"--kernel={kernel}",
-                          "--cmdline=console=hvc0 root=/dev/vda",
+                          "--cmdline=console=hvc0 irqfixup quiet root=/dev/vda",
                           f"--initrd={initrd}",
                           f"--cdrom=./{CLOUDINIT_ISO_NAME}",
                           f"--disk={DISK_FILENAME}",
@@ -170,17 +170,20 @@ class VMManager:
         time.sleep(5)
         ser = serial.Serial(os.path.join(self.vm_directory, "control"),
                             timeout=300)
+        subprocess.run(f'/usr/bin/screen -dm -S console-{self.name} {self.vm_directory}/console',
+                       shell=True)
         for x in range(3):
             status = json.loads(ser.readline().decode())
             self.update_vm_status(status)
 
     def update_vm_status(self, status):
+        print(status)
         status_string = status['status']
         self.configuration['status'] = status_string
         if status_string == "running":
             if "network_addresses" in status:
                 for address, netmask in status['network_addresses']:
-                    if "192.168.68" in address:
+                    if address.startswith("192.168"):
                         self.configuration['ip_address'] = address
 
         with open(os.path.join(self.vm_directory, "vm.json"),
@@ -204,12 +207,7 @@ class VMManager:
     def boot_normally(self):
         vm_disk, vm_boot_disk, cloudinit_iso = self.file_locations()
         boot_filesystem = fs.open_fs(f"fat://{vm_boot_disk}?read_only=true")
-        kernel = sorted([x for x in
-                         boot_filesystem.listdir("/")
-                         if x.startswith("vmlinuz")])[0]
-        initrd = sorted([x for x in boot_filesystem.listdir("/") if
-                         x.startswith("initrd")])[0]
-
+        kernel, initrd = self.profile.get_boot_files_from_filesystem(boot_filesystem)
         kernel_file = boot_filesystem.readbytes(kernel)
         initrd_file = boot_filesystem.readbytes(initrd)
         with tempfile.NamedTemporaryFile(delete=True) as kernel:

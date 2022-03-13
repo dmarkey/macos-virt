@@ -1,5 +1,5 @@
 from profiles import BaseProfile
-from profiles.ubuntu import Ubuntu2004
+from profiles.ubuntu import Ubuntu2004, Ubuntu2104, Ubuntu2110
 
 
 class Registry:
@@ -18,3 +18,5 @@ class Registry:
 registry = Registry()
 
 registry.add_profile(Ubuntu2004)
+registry.add_profile(Ubuntu2104)
+registry.add_profile(Ubuntu2110)
