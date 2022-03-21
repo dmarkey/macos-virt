@@ -260,7 +260,7 @@ class VMManager:
         self.configuration['status'] = status_string
         self.save_configuration_to_disk()
         if status_string == "running":
-            # self.print_status(status)
+            self.print_status(status)
             if "network_addresses" in status:
                 for address, netmask in status['network_addresses']:
                     if address.startswith("192.168"):
