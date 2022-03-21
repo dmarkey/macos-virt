@@ -4,17 +4,14 @@ PREFIX?=/usr/local
 
 all: build/vmcli
 
-build:
-	mkdir -p build
+macos_virt_runner:
+	mkdir -p macos_virt/macos_virt_runner
 
 build/vmcli: build vmcli/Sources/vmcli/main.swift vmcli/Package.swift
-	cd vmcli && swift build -c release --disable-sandbox
-	cp vmcli/.build/release/vmcli build/vmcli
-	codesign -s - --entitlements vmcli/vmcli.entitlements build/vmcli
-	chmod +x build/vmcli
+	cd vmcli && xcrun swift build -c release --arch arm64 --arch x86_64
+	cp vmcli/.build/apple/Products/Release/vmcli macos_virt/macos_virt_runner/macos_virt_runner
+	chmod +x macos_virt/macos_virt_runner/macos_virt_runner
 
 clean:
-	rm -rf build
+	rm -rf macos_virt/macos_virt_runner
 
-install: all
-	install -m 755 build/vmcli $(PREFIX)/bin/vmcli

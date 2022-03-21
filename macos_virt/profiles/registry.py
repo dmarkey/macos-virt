@@ -1,5 +1,5 @@
-from profiles import BaseProfile
-from profiles.ubuntu import Ubuntu2004, Ubuntu2104, Ubuntu2110
+from macos_virt.profiles import BaseProfile
+from macos_virt.profiles.ubuntu import Ubuntu2004, Ubuntu2104, Ubuntu2110
 
 
 class Registry:

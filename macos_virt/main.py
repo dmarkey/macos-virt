@@ -1,7 +1,6 @@
 import typer
-from profiles.registry import registry
-from controller import Controller, DuplicateVMException
-
+from macos_virt.profiles.registry import registry
+from macos_virt.controller import Controller, DuplicateVMException
 
 app = typer.Typer()
 
@@ -9,14 +8,12 @@ app = typer.Typer()
 @app.command()
 def start(name="default", distribution: str = registry.get_distributions()[0],
           memory: int = 1024,
-          cpus: int = 1, disk_size: int = 5000, cloudinit: typer.FileText = None):
+          cpus: int = 1, disk_size: int = 5000):
     try:
-        Controller.start(distribution, name, cpus, memory, disk_size,
-                         cloudinit)
+        Controller.start(distribution, name, cpus, memory, disk_size)
     except DuplicateVMException as e:
         typer.echo(e, err=True)
         raise typer.Exit(code=1)
-
 
 @app.command()
 def ls():
@@ -25,7 +22,7 @@ def ls():
 
 @app.command()
 def stop(name="default", force=False):
-    return
+    Controller.stop(name)
 
 
 @app.command()
@@ -40,8 +37,15 @@ def console(name="default"):
 
 @app.command()
 def delete(name="default"):
-    Controller.delete(name)
+    confirm = typer.confirm(f"Are you sure you want to delete {name}?")
+    if confirm:
+        Controller.delete(name)
 
 
-if __name__ == "__main__":
+@app.command()
+def setup():
+    Controller.setup()
+
+
+def main():
     app()

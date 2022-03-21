@@ -3,7 +3,7 @@ import os
 import platform
 import pathlib
 
-from constants import KERNAL_FILENAME, INITRD_FILENAME, DISK_FILENAME
+from macos_virt.constants import KERNAL_FILENAME, INITRD_FILENAME, DISK_FILENAME
 from .downloader import download
 
 base_path = os.path.join(xdg.xdg_config_home(), "macos-virt/base-files/")

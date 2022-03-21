@@ -2,7 +2,7 @@ import os
 
 from fs.base import FS
 
-from profiles import BaseProfile, PLATFORM, DISK_FILENAME
+from macos_virt.profiles import BaseProfile, PLATFORM, DISK_FILENAME
 from rich.progress import Progress
 import tarfile
 import yaml
@@ -29,8 +29,6 @@ class Ubuntu2004(BaseProfile):
 
     @classmethod
     def get_boot_files_from_filesystem(cls, filesystem: FS):
-        if PLATFORM == "arm64":
-            return "vmlinuz-5.4.0-100-generic", "initrd.img-5.4.0-100-generic"
         files = filesystem.listdir("/")
 
         kernel = sorted([x for x in files if "vmlinuz" in x])[-1]
@@ -86,37 +84,21 @@ class Ubuntu2104(Ubuntu2004):
         return "https://cloud-images.ubuntu.com/releases/hirsute/release/" \
                f"ubuntu-21.04-server-cloudimg-{PLATFORM}.tar.gz"
 
-    @classmethod
-    def get_boot_files_from_filesystem(cls, filesystem: FS):
-        files = filesystem.listdir("/")
-        kernel = sorted([x for x in files if "vmlinuz" in x])[-1]
-        initrd = sorted([x for x in files if "initrd" in x])[-1]
-        return kernel, initrd
-
 
 class Ubuntu2110(Ubuntu2004):
     name = "ubuntu-21.10"
     extracted_name = f"impish-server-cloudimg-{PLATFORM}.img"
 
     @classmethod
-    def get_boot_files_from_filesystem(cls, filesystem: FS):
-        if PLATFORM == "arm64":
-            return "vmlinuz-5.13.0-27-generic", "initrd.img-5.13.0-27-generic"
-        files = filesystem.listdir("/")
-
-        kernel = sorted([x for x in files if "vmlinuz" in x])[-1]
-        initrd = sorted([x for x in files if "initrd" in x])[-1]
-        return kernel, initrd
-
-
-    @classmethod
     def get_kernel_url(cls):
-        return f"https://cloud-images.ubuntu.com/releases/impish/release-20220118/unpacked/" \
+        return f"https://cloud-images.ubuntu.com/" \
+               f"releases/impish/release/unpacked/" \
                f"ubuntu-21.10-server-cloudimg-{PLATFORM}-vmlinuz-generic"
 
     @classmethod
     def get_initrd_url(cls):
-        return f"https://cloud-images.ubuntu.com/releases/impish/release-20220118/unpacked/" \
+        return f"https://cloud-images.ubuntu.com/" \
+               f"releases/impish/release/unpacked/" \
                f"ubuntu-21.10-server-cloudimg-{PLATFORM}-initrd-generic"
 
     @classmethod
