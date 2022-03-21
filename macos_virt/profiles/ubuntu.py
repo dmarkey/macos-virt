@@ -65,6 +65,19 @@ class Ubuntu2004(BaseProfile):
         return template
 
 
+class Ubuntu2004K3S(Ubuntu2004):
+    name = "ubuntu-20.04-k3s"
+
+    @classmethod
+    def render_cloudinit_data(cls, username, ssh_key):
+        template = yaml.safe_load(open(
+            os.path.join(PATH, "ubuntu-cloudinit-k3s.yaml"), "rb"))
+        template['users'][1]['gecos'] = username
+        template['users'][1]['name'] = username
+        template['users'][1]['ssh-authorized-keys'][0] = ssh_key
+        return template
+
+
 class Ubuntu2104(Ubuntu2004):
     name = "ubuntu-21.04"
     extracted_name = f"hirsute-server-cloudimg-{PLATFORM}.img"

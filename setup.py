@@ -34,6 +34,7 @@ setup(name='macos-virt',
       package_data={
           "macos_virt": ["macos_virt_runner/macos_virt_runner",
                          "macos_virt_runner/macos_virt_runner.entitlements",
+                         "profiles/ubuntu-cloudinit-k3s.yaml",
                          "profiles/ubuntu-cloudinit.yaml"],
        }
      )

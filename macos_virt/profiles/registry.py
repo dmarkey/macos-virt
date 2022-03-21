@@ -1,5 +1,6 @@
 from macos_virt.profiles import BaseProfile
-from macos_virt.profiles.ubuntu import Ubuntu2004, Ubuntu2104, Ubuntu2110
+from macos_virt.profiles.ubuntu import Ubuntu2004, Ubuntu2104, \
+    Ubuntu2110, Ubuntu2004K3S
 
 
 class Registry:
@@ -20,3 +21,4 @@ registry = Registry()
 registry.add_profile(Ubuntu2004)
 registry.add_profile(Ubuntu2104)
 registry.add_profile(Ubuntu2110)
+registry.add_profile(Ubuntu2004K3S)

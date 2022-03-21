@@ -72,6 +72,7 @@ class VMNotRunning(BaseError):
 class InternalErrorException(BaseError):
     pass
 
+
 class VMStarted(typer.Exit):
     code = 0
 
@@ -126,10 +127,11 @@ class VMManager:
             self.provision()
         elif self.configuration['status'] == "running":
             self.boot_normally()
+
     @property
     def get_status_port(self):
         return serial.Serial(os.path.join(self.vm_directory, "control"),
-                            timeout=300)
+                             timeout=300)
 
     def send_message(self, message):
         ser = self.get_status_port
@@ -213,7 +215,7 @@ class VMManager:
         time.sleep(5)
         try:
             serial.Serial(os.path.join(self.vm_directory, "control"),
-                                timeout=300)
+                          timeout=300)
         except serial.serialutil.SerialException:
             returncode = process.wait()
 
@@ -235,6 +237,11 @@ class VMManager:
         grid.add_row("Network Addresses", str(status['network_addresses']))
         print(grid)
 
+    def save_configuration_to_disk(self):
+        with open(os.path.join(self.vm_directory, "vm.json"),
+                  "w") as f:
+            json.dump(self.configuration, f)
+
     def update_vm_status(self, status):
         console = Console()
         status_string = status['status']
@@ -250,17 +257,15 @@ class VMManager:
             text = Text("VM Initialization Error")
             text.stylize("bold red")
             console.print(text)
-
         self.configuration['status'] = status_string
-        with open(os.path.join(self.vm_directory, "vm.json"),
-                  "w") as f:
-            json.dump(self.configuration, f)
+        self.save_configuration_to_disk()
         if status_string == "running":
-            self.print_status(status)
+            # self.print_status(status)
             if "network_addresses" in status:
                 for address, netmask in status['network_addresses']:
                     if address.startswith("192.168"):
                         self.configuration['ip_address'] = address
+            self.save_configuration_to_disk()
             raise VMStarted("VM Successfully started.")
 
     def is_running(self):

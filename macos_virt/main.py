@@ -7,13 +7,14 @@ app = typer.Typer()
 
 @app.command()
 def start(name="default", distribution: str = registry.get_distributions()[0],
-          memory: int = 1024,
+          memory: int = 2048,
           cpus: int = 1, disk_size: int = 5000):
     try:
         Controller.start(distribution, name, cpus, memory, disk_size)
     except DuplicateVMException as e:
         typer.echo(e, err=True)
         raise typer.Exit(code=1)
+
 
 @app.command()
 def ls():
