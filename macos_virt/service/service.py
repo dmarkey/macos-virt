@@ -1,8 +1,10 @@
-import serial
-import subprocess
 import json
-import psutil
 import os
+import subprocess
+
+import psutil
+import serial
+import time
 
 ser = serial.Serial("/dev/hvc1")
 
@@ -13,14 +15,21 @@ def send_json_message(message):
 
 
 def send_status():
-    output = {'cpu_count': psutil.cpu_count(),
-              'cpu_usage': psutil.cpu_percent(),
-              'root_fs_usage': psutil.disk_usage("/").percent,
-              'status': 'running',
-              'network_addresses': [[x.address, x.netmask] for x in
-                                    psutil.net_if_addrs()['enp0s1'] if
-                                    x.family.name == "AF_INET"],
-              'memory_usage': psutil.virtual_memory().percent}
+    output = {
+        "cpu_count": psutil.cpu_count(),
+        "cpu_usage": psutil.cpu_percent(),
+        "root_fs_usage": psutil.disk_usage("/").percent,
+        "mounts": open("/proc/mounts").read(),
+        "status": "running",
+        "uptime": int(time.time() - psutil.boot_time()),
+        "processes": len(psutil.pids()),
+        "network_addresses": [
+            [x.address, x.netmask]
+            for x in psutil.net_if_addrs()["enp0s1"]
+            if x.family.name == "AF_INET"
+        ],
+        "memory_usage": psutil.virtual_memory().percent,
+    }
     send_json_message(output)
 
 
@@ -37,12 +46,12 @@ send_status()
 while True:
     incoming = ser.readline()
     command_parsed = json.loads(incoming)
-    if command_parsed['message_type'] == "poweroff":
+    if command_parsed["message_type"] == "poweroff":
         print("Powering off")
-        os.system('poweroff')
-    if command_parsed['message_type'] == "time_update":
+        os.system("poweroff")
+    if command_parsed["message_type"] == "time_update":
         print("Updating the time")
         os.system(f'date +%s -s @{command_parsed["time"]}')
-    if command_parsed['message_type'] == "status":
+    if command_parsed["message_type"] == "status":
         print("Sending status")
         send_status()

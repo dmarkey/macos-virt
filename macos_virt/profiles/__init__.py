@@ -29,7 +29,7 @@ class BaseProfile:
         return (
             os.path.join(cache_directory, KERNAL_FILENAME),
             os.path.join(cache_directory, INITRD_FILENAME),
-            os.path.join(cache_directory, DISK_FILENAME)
+            os.path.join(cache_directory, DISK_FILENAME),
         )
 
     @classmethod
@@ -46,25 +46,36 @@ class BaseProfile:
         raise NotImplementedError()
 
     @classmethod
+    def post_provision_customizations(cls, vm):
+        pass
+
+    @classmethod
     def download_required_files(cls):
         cache_directory = cls.profile_directory()
         if not cls.required_files_exist():
             kernel_url = cls.get_kernel_url()
             initrd_url = cls.get_initrd_url()
             disk_url = cls.get_disk_image_url()
-            tmp_kernel_filename = os.path.join(cache_directory, KERNAL_FILENAME + "_tmp")
-            tmp_initrd_filename = os.path.join(cache_directory, INITRD_FILENAME + "_tmp")
-            tmp_disk_filename = os.path.join(cache_directory, DISK_FILENAME + "_tmp")
-            download([
-                {"from": kernel_url,
-                 "to": tmp_kernel_filename},
-                {"from": initrd_url,
-                 "to": tmp_initrd_filename},
-                {"from": disk_url,
-                 "to": tmp_disk_filename}]
+            tmp_kernel_filename = os.path.join(
+                cache_directory, KERNAL_FILENAME + "_tmp"
             )
-            os.rename(tmp_kernel_filename, os.path.join(cache_directory, KERNAL_FILENAME))
-            os.rename(tmp_initrd_filename, os.path.join(cache_directory, INITRD_FILENAME))
+            tmp_initrd_filename = os.path.join(
+                cache_directory, INITRD_FILENAME + "_tmp"
+            )
+            tmp_disk_filename = os.path.join(cache_directory, DISK_FILENAME + "_tmp")
+            download(
+                [
+                    {"from": kernel_url, "to": tmp_kernel_filename},
+                    {"from": initrd_url, "to": tmp_initrd_filename},
+                    {"from": disk_url, "to": tmp_disk_filename},
+                ]
+            )
+            os.rename(
+                tmp_kernel_filename, os.path.join(cache_directory, KERNAL_FILENAME)
+            )
+            os.rename(
+                tmp_initrd_filename, os.path.join(cache_directory, INITRD_FILENAME)
+            )
             os.rename(tmp_disk_filename, os.path.join(cache_directory, DISK_FILENAME))
             cls.process_downloaded_files(cache_directory)
 
@@ -86,6 +97,3 @@ class BaseProfile:
 
     def get_boot_files_from_filesystem(self, filesystem):
         pass
-
-
-

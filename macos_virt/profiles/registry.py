@@ -1,6 +1,5 @@
 from macos_virt.profiles import BaseProfile
-from macos_virt.profiles.ubuntu import Ubuntu2004, Ubuntu2104, \
-    Ubuntu2110, Ubuntu2004K3S
+from macos_virt.profiles.ubuntu import Ubuntu2004, Ubuntu2104, Ubuntu2110, Ubuntu2004K3S
 
 
 class Registry:
@@ -9,7 +8,7 @@ class Registry:
     def add_profile(self, profile: BaseProfile):
         self.profiles[profile.name] = profile
 
-    def get_distributions(self):
+    def get_profiles(self):
         return list(self.profiles.keys())
 
     def get_profile(self, name) -> BaseProfile:

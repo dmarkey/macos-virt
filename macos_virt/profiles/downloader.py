@@ -1,4 +1,3 @@
-import os.path
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from threading import Event
@@ -52,6 +51,7 @@ def download(urls: Iterable[dict]):
     with progress:
         with ThreadPoolExecutor(max_workers=4) as pool:
             for url in urls:
-                task_id = progress.add_task("download",
-                                            filename=url['from'], start=False)
-                pool.submit(copy_url, task_id, url['from'], url['to'])
+                task_id = progress.add_task(
+                    "download", filename=url["from"], start=False
+                )
+                pool.submit(copy_url, task_id, url["from"], url["to"])
