@@ -419,6 +419,9 @@ class VMManager:
                           f"{self.configuration['cpus']} to {cpus}")
         if memory or cpus:
             self.save_configuration_to_disk()
+        else:
+            console.print(f"🤷 You didn't ask to change anything.")
+
 
 class Controller:
 
