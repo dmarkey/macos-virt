@@ -52,14 +52,20 @@ class BaseProfile:
             kernel_url = cls.get_kernel_url()
             initrd_url = cls.get_initrd_url()
             disk_url = cls.get_disk_image_url()
+            tmp_kernel_filename = os.path.join(cache_directory, KERNAL_FILENAME + "_tmp")
+            tmp_initrd_filename = os.path.join(cache_directory, INITRD_FILENAME + "_tmp")
+            tmp_disk_filename = os.path.join(cache_directory, DISK_FILENAME + "_tmp")
             download([
                 {"from": kernel_url,
-                 "to": os.path.join(cache_directory, KERNAL_FILENAME)},
+                 "to": tmp_kernel_filename},
                 {"from": initrd_url,
-                 "to": os.path.join(cache_directory, INITRD_FILENAME)},
+                 "to": tmp_initrd_filename},
                 {"from": disk_url,
-                 "to": os.path.join(cache_directory, DISK_FILENAME)}]
+                 "to": tmp_disk_filename}]
             )
+            os.rename(tmp_kernel_filename, os.path.join(cache_directory, KERNAL_FILENAME))
+            os.rename(tmp_initrd_filename, os.path.join(cache_directory, INITRD_FILENAME))
+            os.rename(tmp_disk_filename, os.path.join(cache_directory, DISK_FILENAME))
             cls.process_downloaded_files(cache_directory)
 
     @classmethod

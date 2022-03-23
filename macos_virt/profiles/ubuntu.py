@@ -1,11 +1,11 @@
 import os
+import tarfile
 
+import yaml
 from fs.base import FS
+from rich.progress import Progress
 
 from macos_virt.profiles import BaseProfile, PLATFORM, DISK_FILENAME
-from rich.progress import Progress
-import tarfile
-import yaml
 
 PATH = os.path.dirname(os.path.abspath(__file__))
 
@@ -14,6 +14,8 @@ class Ubuntu2004(BaseProfile):
     name = "ubuntu-20.04"
 
     extracted_name = f"focal-server-cloudimg-{PLATFORM}.img"
+
+    cloudinit_file = "ubuntu-cloudinit.yaml"
 
     @classmethod
     def process_downloaded_files(cls, cache_directory):
@@ -38,14 +40,14 @@ class Ubuntu2004(BaseProfile):
     @classmethod
     def get_kernel_url(cls):
         return f"https://cloud-images.ubuntu.com/" \
-               f"releases/focal/release-20220302/" \
+               f"releases/focal/release/" \
                f"unpacked/" \
                f"ubuntu-20.04-server-cloudimg-{PLATFORM}-vmlinuz-generic"
 
     @classmethod
     def get_initrd_url(cls):
         return f"https://cloud-images.ubuntu.com/" \
-               f"releases/focal/release-20220302/" \
+               f"releases/focal/release/" \
                f"unpacked/" \
                f"ubuntu-20.04-server-cloudimg-{PLATFORM}-initrd-generic"
 
@@ -58,23 +60,66 @@ class Ubuntu2004(BaseProfile):
     @classmethod
     def render_cloudinit_data(cls, username, ssh_key):
         template = yaml.safe_load(open(
-            os.path.join(PATH, "ubuntu-cloudinit.yaml"), "rb"))
+            os.path.join(PATH, cls.cloudinit_file), "rb"))
         template['users'][1]['gecos'] = username
         template['users'][1]['name'] = username
         template['users'][1]['ssh-authorized-keys'][0] = ssh_key
+        if "write_files" in template:
+            write_files = template['write_files']
+        else:
+            write_files = []
+
+        write_files.append({
+            "content":
+                open(os.path.join(PATH, "../service/install_boot.sh")).read(),
+            "path": "/usr/sbin/install_boot.sh"
+        })
+        write_files.append({
+            "content":
+                open(os.path.join(PATH, "../service/service.py")).read(),
+            "path": "/usr/sbin/macos-virt-service.py"
+        })
+        write_files.append({
+            "content":
+                open(os.path.join(PATH, "../service/macos-virt-service.service")).read(),
+            "path": "/etc/systemd/system/macos-virt-service.service"
+        })
+        template['write_files'] = write_files
         return template
 
 
 class Ubuntu2004K3S(Ubuntu2004):
     name = "ubuntu-20.04-k3s"
+    k3s_installer = """
+      #!/bin/sh
+      curl -sfL https://get.k3s.io | sudo INSTALL_K3S_VERSION=v1.23.3+k3s1 INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --docker" sh -
+    """
 
     @classmethod
     def render_cloudinit_data(cls, username, ssh_key):
-        template = yaml.safe_load(open(
-            os.path.join(PATH, "ubuntu-cloudinit-k3s.yaml"), "rb"))
-        template['users'][1]['gecos'] = username
-        template['users'][1]['name'] = username
-        template['users'][1]['ssh-authorized-keys'][0] = ssh_key
+        template = Ubuntu2004.render_cloudinit_data(username, ssh_key)
+        apt_sources = template.get("apt_sources", [])
+        apt_sources.append(
+            {"source": "ppa:canonical-server/server-backports"}
+        )
+        template['apt_sources'] = apt_sources
+
+        packages = template.get("packages", [])
+        packages.append("docker.io")
+        packages.append("qemu")
+        packages.append("binfmt-support")
+        packages.append("qemu-user-static")
+        template['packages'] = packages
+        write_files = template.get("write_files", [])
+        write_files.append({
+            "content":
+                cls.k3s_installer,
+            "path": "/root/k3s-init.sh"
+        })
+        template['write_files'] = write_files
+        runcmd = template.get("runcmd", [])
+        runcmd.append(["bash", "/root/k3s-init.sh"])
+        template['runcmd'] = runcmd
         return template
 
 

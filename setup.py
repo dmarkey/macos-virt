@@ -8,7 +8,7 @@ setup(name='macos-virt',
       author='David Markey',
       author_email='david@dmarkey.com',
       url='https://github.com/dmarkey/macos-virt',
-      packages=['macos_virt', "macos_virt.profiles"],
+      packages=['macos_virt', "macos_virt.profiles", "macos_virt.service"],
       entry_points={
           'console_scripts': [
               'macos-virt=macos_virt.main:main',
@@ -34,7 +34,8 @@ setup(name='macos-virt',
       package_data={
           "macos_virt": ["macos_virt_runner/macos_virt_runner",
                          "macos_virt_runner/macos_virt_runner.entitlements",
-                         "profiles/ubuntu-cloudinit-k3s.yaml",
                          "profiles/ubuntu-cloudinit.yaml"],
-       }
-     )
+          "macos_virt.service": ["install_boot.sh", "macos-virt-service.service"
+                                 ],
+      }
+      )

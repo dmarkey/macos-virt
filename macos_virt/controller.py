@@ -1,7 +1,7 @@
-import getpass
-import gzip
-import os
 import glob
+import gzip
+import json
+import os
 import pathlib
 import random
 import shutil
@@ -10,23 +10,21 @@ import tempfile
 import time
 from io import BytesIO
 from subprocess import check_output
+
+import fs
 import pycdlib
 import serial
-import fs
 import typer
 import xdg as xdg
-import json
-from rich.console import Console
-from rich.text import Text
-from rich.table import Table
-from rich import print
-
 import yaml
+from rich import print
+from rich.console import Console
 from rich.progress import track
+from rich.table import Table
 
-from macos_virt.profiles.registry import registry
 from macos_virt.constants import (DISK_FILENAME, BOOT_DISK_FILENAME,
                                   CLOUDINIT_ISO_NAME)
+from macos_virt.profiles.registry import registry
 
 MODULE_PATH = os.path.dirname(__file__)
 
@@ -43,6 +41,10 @@ KEY_PATH_PUBLIC = os.path.join(xdg.xdg_config_home(),
 RUNNER_PATH = os.path.join(MODULE_PATH, "macos_virt_runner/macos_virt_runner")
 RUNNER_PATH_ENTITLEMENTS = os.path.join(MODULE_PATH, "macos_virt_runner/"
                                                      "macos_virt_runner.entitlements")
+
+USERNAME = "macos-virt"
+
+console = Console()
 
 
 class BaseError(typer.Exit):
@@ -69,7 +71,15 @@ class VMNotRunning(BaseError):
     pass
 
 
+class VMExists(BaseError):
+    pass
+
+
 class InternalErrorException(BaseError):
+    pass
+
+
+class ImmutableConfiguration(BaseError):
     pass
 
 
@@ -84,17 +94,42 @@ def get_vm_directory(name):
 
 
 class VMManager:
-    def __init__(self, vm_directory):
-        self.vm_directory = vm_directory
-        self.name = os.path.basename(vm_directory)
-        self.configuration = json.load(
-            open(os.path.join(vm_directory, "vm.json")))
+    def __init__(self, name):
+        self.name = name
+        self.vm_directory = os.path.join(BASE_PATH, name)
+        self.vm_configuration_file = os.path.join(self.vm_directory, "vm.json")
+        self.exists = False
+        if os.path.exists(self.vm_configuration_file):
+            self.exists = True
+        self.configuration = {}
+        self.profile = None
+
+    def create(self, profile, cpus, memory, disk_size):
+        if self.exists:
+            raise VMExists(f"VM {self.name} already exists")
+        self.configuration = {
+            "memory": memory,
+            "cpus": cpus,
+            "profile": profile,
+            "disk_size": disk_size,
+            "ip_address": None,
+            "status": "uninitialized",
+            "mac_address": "52:54:00:%02x:%02x:%02x" % (
+                random.randint(0, 255),
+                random.randint(0, 255),
+                random.randint(0, 255),
+            )
+        }
+        pathlib.Path(self.vm_directory).mkdir(parents=True)
+        self.save_configuration_to_disk()
         self.profile = registry.get_profile(self.configuration['profile'])
+        self.provision()
 
     def is_provisioned(self):
         return self.configuration.get("status") == "running"
 
     def get_ip_address(self):
+        self.load_configuration_from_disk()
         ip_address = self.configuration.get("ip_address", None)
         if not ip_address:
             raise VMHasNoAssignedAddress("VM has no assigned IP address")
@@ -107,11 +142,18 @@ class VMManager:
             os.path.join(self.vm_directory, CLOUDINIT_ISO_NAME)
         )
 
-    def shell(self, *args):
+    def shell(self, args, wait=False):
+        if not self.is_running():
+            raise VMNotRunning(f"🤷 VM {self.name} is not running.")
         ip_address = self.get_ip_address()
-        os.execl("/usr/bin/ssh", "/usr/bin/ssh",
-                 "-oStrictHostKeyChecking=no",
-                 "-i", KEY_PATH, ip_address, *args)
+        to_spawn = ["/usr/bin/ssh",
+                    "-oStrictHostKeyChecking=no", "-i", KEY_PATH, f"{USERNAME}@{ip_address}"]
+        if args is not None:
+            to_spawn += [args]
+        if wait:
+            check_output(to_spawn)
+            return
+        os.execl("/usr/bin/ssh", *to_spawn)
 
     @staticmethod
     def get_ssh_public_key():
@@ -121,12 +163,20 @@ class VMManager:
         return open(KEY_PATH_PUBLIC).read()
 
     def start(self):
+        if not self.exists:
+            raise VMDoesntExist("🤷 VM {self.name} does not exist.")
+        self.load_configuration_from_disk()
         if self.is_running():
-            raise VMRunning(f"VM {self.name} is already running.")
-        elif self.configuration['status'] == "uninitialized":
-            self.provision()
+            raise VMRunning(f"🤷 VM {self.name} is already running.")
+
         elif self.configuration['status'] == "running":
-            self.boot_normally()
+            return self.boot_normally()
+
+        raise InternalErrorException(f"VM {self.name} is in an unknown state, can't boot.")
+
+    def load_configuration_from_disk(self):
+        self.configuration = json.load(open(self.vm_configuration_file))
+        self.profile = registry.get_profile(self.configuration['profile'])
 
     @property
     def get_status_port(self):
@@ -138,13 +188,22 @@ class VMManager:
         dumped = json.dumps(message)
         ser.write((dumped + "\r\n").encode())
 
-    def receive_message(self):
-        ser = self.get_status_port
-
-    def stop(self):
+    def stop(self, force=False):
         if not self.is_running():
-            raise VMNotRunning("VM is not running")
+            raise VMNotRunning(f"🤷 VM {self.name} is not running")
+        if force:
+            pid = open(
+                os.path.join(self.vm_directory, "pidfile")).read()
+            try:
+                os.kill(int(pid), 15)
+            except OSError:
+                pass
+            finally:
+                console.print(f":skull: VM  {self.name} terminated by force")
+                return
+
         self.send_message({'message_type': "poweroff"})
+        console.print(f":sleeping: Stop request sent to {self.name}")
 
     def provision(self):
         vm_disk, vm_boot_disk, cloudinit_iso = self.file_locations()
@@ -160,10 +219,9 @@ class VMManager:
             for n in track(range(chunks),
                            description="Expanding Root Image..."):
                 f.write(mb_padding)
-        username = getpass.getuser()
         ssh_key = self.get_ssh_public_key()
         cloudinit_content = self.profile.render_cloudinit_data(
-            username, ssh_key)
+            USERNAME, ssh_key)
         iso = pycdlib.PyCdlib()
         iso.new(interchange_level=4,
                 joliet=True,
@@ -196,22 +254,26 @@ class VMManager:
                 f.write(uncompressed)
         except gzip.BadGzipFile:
             pass
-        process = subprocess.Popen(
-            [RUNNER_PATH,
-             "--pidfile=./pidfile",
-             f"--kernel={kernel}",
-             "--cmdline=console=hvc0 irqfixup"
-             " quiet root=/dev/vda",
-             f"--initrd={initrd}",
-             f"--cdrom=./{CLOUDINIT_ISO_NAME}",
-             f"--disk={DISK_FILENAME}",
-             f"--disk={BOOT_DISK_FILENAME}",
-             f"--network={self.configuration['mac_address']}@nat",
-             f"--cpu-count={self.configuration['cpus']}",
-             f"--memory-size={self.configuration['memory']}",
-             "--console-symlink=console",
-             "--control-symlink=control",
-             ], cwd=self.vm_directory)
+
+        check_output(["codesign", "-f", "-s", "-", "--entitlements",
+                      RUNNER_PATH_ENTITLEMENTS, RUNNER_PATH])
+        arguments = [RUNNER_PATH,
+                     "--pidfile=./pidfile",
+                     f"--kernel={kernel}",
+                     "--cmdline=console=hvc0 irqfixup"
+                     " quiet root=/dev/vda",
+                     f"--initrd={initrd}",
+                     f"--cdrom=./{CLOUDINIT_ISO_NAME}",
+                     f"--disk={DISK_FILENAME}",
+                     f"--disk={BOOT_DISK_FILENAME}",
+                     f"--network={self.configuration['mac_address']}@nat",
+                     f"--cpu-count={self.configuration['cpus']}",
+                     f"--memory-size={self.configuration['memory']}",
+                     "--console-symlink=console",
+                     "--control-symlink=control",
+                     ]
+        process = subprocess.Popen(arguments
+                                   , cwd=self.vm_directory)
         time.sleep(5)
         try:
             serial.Serial(os.path.join(self.vm_directory, "control"),
@@ -228,8 +290,8 @@ class VMManager:
 
     def print_status(self, status):
         grid = Table.grid()
-        grid.add_column()
-        grid.add_column()
+        grid.add_column(width=40)
+        grid.add_column(style="bold")
         grid.add_row("CPU Count", str(status['cpu_count']))
         grid.add_row("CPU Usage", str(status['cpu_usage']))
         grid.add_row("Memory Usage", str(status['memory_usage']))
@@ -243,19 +305,15 @@ class VMManager:
             json.dump(self.configuration, f)
 
     def update_vm_status(self, status):
-        console = Console()
         status_string = status['status']
         if status_string == "initializing":
-            text = Text("VM Booted, waiting for initialization")
-            text.stylize("bold magenta")
+            text = ":hatching_chick: VM has made first contact"
             console.print(text)
         if status_string == "initialization_complete":
-            text = Text("Initialization Complete.")
-            text.stylize("bold green")
+            text = ":hatched_chick: Initialization complete"
             console.print(text)
         if status_string == "initialization_error":
-            text = Text("VM Initialization Error")
-            text.stylize("bold red")
+            text = ":rotating_light: VM had a problem initializing"
             console.print(text)
         self.configuration['status'] = status_string
         self.save_configuration_to_disk()
@@ -286,6 +344,8 @@ class VMManager:
         boot_filesystem = fs.open_fs(f"fat://{vm_boot_disk}?read_only=true")
         kernel, initrd = self.profile.get_boot_files_from_filesystem(
             boot_filesystem)
+        console.print(f":floppy_disk: Booting with Kernel {kernel} and"
+                      f" Ramdisk {initrd} from Boot volume")
         kernel_file = boot_filesystem.readbytes(kernel)
         initrd_file = boot_filesystem.readbytes(initrd)
         with tempfile.NamedTemporaryFile(delete=True) as kernel:
@@ -295,9 +355,8 @@ class VMManager:
                 self.boot_vm(kernel.name, initrd.name)
 
     def watch_initialization(self):
-        console = Console()
-        text = Text("VM Started.")
-        text.stylize("bold gray")
+        text = "🥚 VM has been created"
+
         console.print(text)
         port = self.get_status_port
 
@@ -305,70 +364,113 @@ class VMManager:
             status = json.loads(port.readline().decode())
             self.update_vm_status(status)
 
+    def delete(self):
+        if not self.exists:
+            raise VMDoesntExist(f"🤷 VM {self.name} does not exist.")
+        if self.is_running():
+            raise VMRunning("VM {self.name} is running, please stop it before deleting.")
+        shutil.rmtree(self.vm_directory)
+
+    def cp(self, source, destination, recursive=False):
+        if not self.is_running():
+            raise VMNotRunning(f"🤷 VM {self.name} is not running.")
+        args = []
+        if source.startswith("vm:"):
+            args.append(f"{USERNAME}@{self.get_ip_address()}:{source[3:]}")
+            args.append(destination)
+        elif destination.startswith("vm:"):
+            args.append(source)
+            args.append(f"{USERNAME}@{self.get_ip_address()}:{source[3:]}")
+        if not args:
+            raise InternalErrorException("Copy arguments missing vm: prefix to indicate direction.")
+        if recursive:
+            args.insert(0, "-r")
+        full_args = ["/usr/bin/scp", "-o", "StrictHostKeyChecking=no", "-i", KEY_PATH] + args
+        check_output(full_args)
+
+    def mount(self, source, destination):
+        if not self.is_running():
+            raise VMNotRunning(f"🤷 VM {self.name} is not running.")
+        source = os.path.abspath(source)
+        if not os.path.isdir(source):
+            raise InternalErrorException(f"{source} is not a directory")
+        fifo_name = os.path.join(self.vm_directory, f"sshfs-fifo-{os.getpid()}")
+        os.mkfifo(fifo_name)
+        self.shell(f"sudo mkdir -p {destination} && sudo chown 1000 {destination}", wait=True)
+
+        subprocess.Popen(
+            f'nohup sh -c \"< {fifo_name} /usr/libexec/sftp-server | ssh -c aes128-ctr -o Compression=no -o ServerAliveInterval=15 -o ServerAliveCountMax=3 '
+            f'-i {KEY_PATH} {USERNAME}@{self.get_ip_address()} '
+            f'sshfs -o slave ":{source}" "{destination}" -o uid=1000  > {fifo_name}\" > /dev/null',
+            shell=True)
+
 
 class Controller:
 
     @classmethod
-    def get_valid_vms(cls):
-        return [os.path.basename(os.path.dirname(x)) for x in
-                glob.glob(f"{BASE_PATH}/*/vm.json")]
+    def get_all_vm_status(cls):
+
+        vms = [os.path.basename(os.path.dirname(x)) for x in
+               glob.glob(f"{BASE_PATH}/*/vm.json")]
+        table = Table()
+        table.add_column("VM Name", width=35)
+        table.add_column("IP Address")
+        table.add_column("Distribution")
+        table.add_column("CPUs")
+        table.add_column("Memory")
+        table.add_column("Status")
+        for vm in vms:
+            vm_obj = VMManager(vm)
+            if vm_obj.exists:
+                vm_obj.load_configuration_from_disk()
+                configuration = vm_obj.configuration
+                try:
+                    ip_address = vm_obj.get_ip_address()
+                except VMHasNoAssignedAddress:
+                    ip_address = "None"
+
+                if vm_obj.is_running():
+                    status = "Running :person_running:"
+                else:
+                    status = "Stopped :stop_button:"
+
+                table.add_row(vm, ip_address, configuration['profile'],
+                              str(configuration['cpus']), str(configuration['memory']),
+                              status)
+
+        print(table)
 
     @classmethod
-    def start(cls, profile, name, cpus, memory, disk_size):
-        if name in cls.get_valid_vms():
-            vm_directory = get_vm_directory(name)
-            vm = VMManager(vm_directory)
-            if vm.is_provisioned():
-                vm.start()
-                return
-
-            raise DuplicateVMException(f"VM {name} already exists")
-        else:
-            configuration = {
-                "memory": memory,
-                "cpus": cpus,
-                "disk_size": disk_size,
-                "profile": profile,
-                "ip_address": None,
-                "mac_address": "52:54:00:%02x:%02x:%02x" % (
-                    random.randint(0, 255),
-                    random.randint(0, 255),
-                    random.randint(0, 255),
-                ),
-                "status": "uninitialized"
-            }
-            with open(os.path.join(get_vm_directory(name), "vm.json"),
-                      "w") as f:
-                json.dump(configuration, f)
-            vm_directory = get_vm_directory(name)
-            vm = VMManager(vm_directory)
-            vm.start()
+    def create(cls, profile, name, cpus, memory, disk_size):
+        vm = VMManager(name)
+        vm.create(profile, cpus, memory, disk_size)
 
     @classmethod
     def delete(cls, name):
-        if name not in cls.get_valid_vms():
-            raise VMDoesntExist(f"VM {name} doesnt exist")
-        vm = VMManager(get_vm_directory(name))
-        if vm.is_running():
-            raise VMRunning(f"VM {name} is running,"
-                            f" please stop before deleting")
-        shutil.rmtree(get_vm_directory(name))
+        vm = VMManager(name)
+        vm.delete()
 
     @classmethod
-    def stop(cls, name):
-        vm = VMManager(get_vm_directory(name))
-        vm.stop()
+    def stop(cls, name, force: bool = False):
+        vm = VMManager(name)
+        vm.stop(force=force)
 
     @classmethod
-    def shell(cls, name, *args):
-        if name not in cls.get_valid_vms():
-            raise VMDoesntExist(f"VM {name} doesnt exist")
-        vm = VMManager(get_vm_directory(name))
-        if not vm.is_running():
-            raise VMNotRunning(f"VM {name} is not running,")
-        vm.shell(*args)
+    def start(cls, name):
+        vm = VMManager(name)
+        vm.start()
 
     @classmethod
-    def setup(cls):
-        check_output(["codesign", "-s", "-", "--entitlements",
-                      RUNNER_PATH_ENTITLEMENTS, RUNNER_PATH])
+    def cp(cls, name, source, destination, recursive=False):
+        vm = VMManager(name)
+        vm.cp(source, destination, recursive)
+
+    @classmethod
+    def mount(cls, name, source, destination):
+        vm = VMManager(name)
+        vm.mount(source, destination)
+
+    @classmethod
+    def shell(cls, name, command):
+        vm = VMManager(name)
+        vm.shell(command)

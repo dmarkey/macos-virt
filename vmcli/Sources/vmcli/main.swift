@@ -81,14 +81,6 @@ func openDisk(path: String, readOnly: Bool) throws -> VZVirtioBlockDeviceConfigu
   return vmBlockDevCfg
 }
 
-@available(macOS 12, *)
-func openFolder(path: String) throws -> VZDirectorySharingDeviceConfiguration {
-  let sharedDirectory = VZSharedDirectory(url: URL(fileURLWithPath: path), readOnly: false)
-  let vzDirShare = VZVirtioFileSystemDeviceConfiguration(tag: path)
-  vzDirShare.share = VZSingleDirectoryShare(directory: sharedDirectory)
-  return vzDirShare
-}
-
 
 class VMCLIDelegate: NSObject, VZVirtualMachineDelegate {
   func guestDidStop(_ virtualMachine: VZVirtualMachine) {
@@ -272,15 +264,6 @@ struct VMCLI: ParsableCommand {
     // The #available check still causes a runtime dyld error on macOS 11 (Big Sur),
     // apparently due to a Swift bug, so add an extra check to work around this until
     // the bug is resolved. See eg https://developer.apple.com/forums/thread/688678
-    #if EXTRA_WORKAROUND_FOR_BIG_SUR
-    #else
-      if #available(macOS 12, *) {
-        for folder in folders {
-          puts("Adding shared folder '\(folder)', but be warned, this might be unstable.")
-          try vmCfg.directorySharingDevices.append(openFolder(path: folder))
-        }
-      }
-    #endif
     // set up networking
     // TODO: better error handling
     vmCfg.networkDevices = []
