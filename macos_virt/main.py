@@ -27,8 +27,14 @@ def stop(name="default", force: bool = typer.Option(False, "--force")):
 
 
 @app.command()
-def start(name="default", force=False):
+def start(name="default"):
     Controller.start(name)
+
+
+@app.command()
+def update(name="default", memory: int = None,
+           cpus: int = None):
+    Controller.update_vm_resources(name, memory, cpus)
 
 
 @app.command()

@@ -404,6 +404,21 @@ class VMManager:
             f'sshfs -o slave ":{source}" "{destination}" -o uid=1000  > {fifo_name}\" > /dev/null',
             shell=True)
 
+    def update_resources(self, memory, cpus):
+        if self.is_running():
+            raise VMRunning(f"🤷 VM {self.name} is running, "
+                            f"Please shut it down before updating resources.")
+        self.load_configuration_from_disk()
+        if memory:
+            console.print(f":rocket: changing memory from "
+                          f"{self.configuration['memory']} to {memory}")
+            self.configuration['memory'] = memory
+        if cpus:
+            self.configuration['cpus'] = cpus
+            console.print(f":rocket: changing CPUs from "
+                          f"{self.configuration['cpus']} to {cpus}")
+        if memory or cpus:
+            self.save_configuration_to_disk()
 
 class Controller:
 
@@ -474,3 +489,9 @@ class Controller:
     def shell(cls, name, command):
         vm = VMManager(name)
         vm.shell(command)
+
+    @classmethod
+    def update_vm_resources(cls, name, memory, cpus):
+        vm = VMManager(name)
+        vm.update_resources(memory, cpus)
+
