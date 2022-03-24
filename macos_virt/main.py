@@ -20,7 +20,7 @@ running_vms = [(vm, vm) for vm in Controller.list_running_vms()]
 running_vms_enum = enum.Enum("RunningVMs", dict(running_vms))
 
 
-@app.command(help="Create a new VM.")
+@app.command(help="Create a new VM")
 def create(
     name="default",
     profile: profiles_enum = "ubuntu-20.04",
@@ -36,7 +36,7 @@ def ls():
     Controller.get_all_vm_status()
 
 
-@app.command(help="Stop a running VM.")
+@app.command(help="Stop a running VM")
 def stop(
     name: running_vms_enum,
     force: bool = typer.Option(False, "--force", help="Kills the VM unceremoniously."),
@@ -45,12 +45,12 @@ def stop(
     VMManager(name.value).stop(force=force)
 
 
-@app.command(help="Start an already created VM.")
-def start(name: vms_enum = "default"):
+@app.command(help="Start an already created VM")
+def start(name: vms_enum):
     VMManager(name.value).start()
 
 
-@app.command(help="Get high level status of a VM")
+@app.command(help="Get high level status of a running VM")
 def status(name: running_vms_enum):
     VMManager(name.value).print_realtime_status()
 
@@ -60,17 +60,17 @@ def update(name: vms_enum = "default", memory: int = None, cpus: int = None):
     VMManager(name.value).update_resources(memory, cpus)
 
 
-@app.command(help="Mount a local directory into the VM.")
+@app.command(help="Mount a local directory into the VM")
 def mount(name: running_vms_enum, source, destination):
     VMManager(name.value).mount(source, destination)
 
 
-@app.command(help="Access a shell to the VM")
+@app.command(help="Access a shell to a running VM")
 def shell(name: running_vms_enum, command: str = None):
     VMManager(name.value).shell(command)
 
 
-@app.command(help="Copy a file to/from the VM, macos-virt cp default vm:/etc/passwd .")
+@app.command(help="Copy a file to/from a running VM, macos-virt cp default vm:/etc/passwd")
 def cp(
     name: running_vms_enum,
     src,
@@ -80,7 +80,7 @@ def cp(
     VMManager(name.value).cp(source=src, destination=destination, recursive=recursive)
 
 
-@app.command(help="Delete a stopped VM.")
+@app.command(help="Delete a stopped VM")
 def rm(name: vms_enum):
     confirm = typer.confirm(f"Are you sure you want to delete {name}?")
     if confirm:
