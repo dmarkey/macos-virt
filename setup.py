@@ -1,15 +1,19 @@
 #!/usr/bin/env python
 import platform
 from distutils.core import setup
-from distutils.version import StrictVersion
+from packaging.version import Version
 import sys
+from pathlib import Path
+this_directory = Path(__file__).parent
+long_description = (this_directory / "README.md").read_text()
+
 mac_version = platform.mac_ver()[0]
 
 if not mac_version:
     print('This package only works on Mac, Sorry.')
     sys.exit(1)
-mac_version = StrictVersion(mac_version)
-if mac_version < StrictVersion("12.3"):
+mac_version = Version(mac_version)
+if mac_version < Version("12.3"):
     print('This package has been tested on MacOS 12.3, Please upgrade.')
     sys.exit(1)
 
@@ -29,7 +33,8 @@ setup(name='macos-virt',
       include_package_data=True,
       classifiers=['Development Status :: 3 - Alpha',
                    'License :: OSI Approved :: MIT License'],
-
+      long_description=long_description,
+      long_description_content_type='text/markdown',
       install_requires=[
           'appdirs==1.4.4',
           "click==8.0.4",
