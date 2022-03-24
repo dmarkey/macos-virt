@@ -2,6 +2,8 @@
 
 A utility to get up and running with MacOS's Virtualization.Framework in 5 minutes.
 
+[![asciicast](https://asciinema.org/a/pHX3Kjn7BHC6DSukRkKaIntw2.svg)](https://asciinema.org/a/pHX3Kjn7BHC6DSukRkKaIntw2)
+
 ## Installation
 
 You need python3 installed, either install it via Brew or Command Line Tools
