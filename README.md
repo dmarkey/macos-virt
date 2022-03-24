@@ -27,6 +27,8 @@ pip install macos-virt
 
 > :warning: **This package contains a swift binary called macos-virt-runner. It is not signed. An attempt is made to sign it using your Mac's inbuilt cert, if this causes you any problems open an issue.**
 
+> :warning: **This is alpha software. Please don't run your production DB on this.**
+
 ### Features
 
 * Quickstart seamless setup, 5 minutes until your VM is ready to use.
