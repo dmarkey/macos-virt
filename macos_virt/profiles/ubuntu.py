@@ -192,7 +192,7 @@ class Ubuntu2104(Ubuntu2004):
 class Ubuntu2110(Ubuntu2004):
     name = "ubuntu-21.10"
     extracted_name = f"impish-server-cloudimg-{PLATFORM}.img"
-    description = "Ubuntu 21.04 Server Cloud Image"
+    description = "Ubuntu 21.10 Server Cloud Image"
 
     @classmethod
     def get_kernel_url(cls):

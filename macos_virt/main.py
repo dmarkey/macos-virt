@@ -5,8 +5,9 @@ from rich.table import Table
 
 from macos_virt.controller import Controller, VMManager
 from macos_virt.profiles.registry import registry
+from importlib.metadata import version as package_version
 
-app = typer.Typer()
+app = typer.Typer(name="macos-virt - a utility to run Linux VMs using Virtualization.Framework")
 
 profiles = [(profile, profile) for profile in registry.profiles.keys()]
 
@@ -80,10 +81,15 @@ def cp(
 
 
 @app.command(help="Delete a stopped VM.")
-def delete(name: vms_enum):
+def rm(name: vms_enum):
     confirm = typer.confirm(f"Are you sure you want to delete {name}?")
     if confirm:
         VMManager(name.value).delete()
+
+
+@app.command(help="Show Version information")
+def version():
+    typer.echo(f"Macos-virt version {package_version('macos_virt')}")
 
 
 @app.command(help="Describe profiles that are available")
