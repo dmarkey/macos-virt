@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import platform
 from distutils.core import setup
-from packaging.version import Version
+from distutils.version import StrictVersion
 import sys
 from pathlib import Path
 this_directory = Path(__file__).parent
@@ -12,14 +12,14 @@ mac_version = platform.mac_ver()[0]
 if not mac_version:
     print('This package only works on Mac, Sorry.')
     sys.exit(1)
-mac_version = Version(mac_version)
-if mac_version < Version("12.3"):
+mac_version = StrictVersion(mac_version)
+if mac_version < StrictVersion("12.3"):
     print('This package has been tested on MacOS 12.3, Please upgrade.')
     sys.exit(1)
 
 
 setup(name='macos-virt',
-      version='0.1.0',
+      version='0.1.1',
       description='MacOS utility to run Linux using Virtualization.Framework',
       author='David Markey',
       author_email='david@dmarkey.com',
