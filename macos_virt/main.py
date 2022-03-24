@@ -64,7 +64,12 @@ def update(name: vms_enum = "default", memory: int = None, cpus: int = None):
 def mount(name: running_vms_enum, source, destination,
           ro: bool = typer.Option(False, "--ro",
                                   help="Mount read only.")):
-    VMManager(name.value).mount(source, destination, ro) \
+    VMManager(name.value).mount(source, destination, ro)
+
+
+@app.command(help="Unmount a directory in the VM")
+def umount(name: running_vms_enum, mountpoint):
+    VMManager(name.value).umount(mountpoint)
 
 
 @app.command(help="Access a shell to a running VM")

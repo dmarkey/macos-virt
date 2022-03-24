@@ -461,7 +461,7 @@ class VMManager:
         time.sleep(3)
         fuse_mounts = self.list_mounts()
         if destination in fuse_mounts:
-            console.print(f":computer_disk: {destination} successfully mounted")
+            console.print(f":computer_disk: {source} successfully mounted to {destination}")
         else:
             console.print(f":broken_heart: {destination} was not mounted successfully")
 
@@ -488,6 +488,14 @@ class VMManager:
             self.save_configuration_to_disk()
         else:
             console.print(f"🤷 You didn't ask to change anything.")
+
+    def umount(self, mountpoint):
+        mounts = self.list_mounts()
+        if mountpoint not in mounts:
+            raise InternalErrorException(
+                f"🤷 VM {self.name} has no mountpoint {mountpoint}")
+        self.shell(args=f"sudo umount {mountpoint}", wait=True)
+        console.print(f"❌ Mountpoint {mountpoint} unmounted.")
 
 
 class Controller:
