@@ -39,6 +39,14 @@ pip install macos-virt
 * Wake from Suspend notification to keep VM time in sync
 * Mount Host directories to the VM using sshfs (Native Virtualization.Framework implementation seems unreliable)
 * Shell Completion
+* Less than 1MB in size (slightly more with dependencies)
+
+# What it doesn't do
+
+* MacOS guests
+* Memory Ballooning
+* VM Suspend/Resume
+* Any Graphical Desktops
 
 ### Usage
 
