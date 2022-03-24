@@ -435,7 +435,7 @@ class VMManager:
         return [x.split(" ")[1] for x in status['mounts'].splitlines()
                 if "fuse.sshfs" in x]
 
-    def mount(self, source, destination):
+    def mount(self, source, destination, ro=False):
         if not self.is_running():
             raise VMNotRunning(f"🤷 VM {self.name} is not running.")
         source = os.path.abspath(source)
@@ -446,12 +446,16 @@ class VMManager:
         self.shell(
             f"sudo mkdir -p {destination} && sudo chown 1000 {destination}", wait=True
         )
+        if ro:
+            ro_string = " -R "
+        else:
+            ro_string = ""
 
         subprocess.Popen(
-            f'nohup sh -c "< {fifo_name} /usr/libexec/sftp-server | '
+            f'nohup sh -c "< {fifo_name} /usr/libexec/sftp-server {ro_string} | '
             f"ssh -c aes128-ctr -o Compression=no -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "
             f"-i {KEY_PATH} {USERNAME}@{self.get_ip_address()} "
-            f'sshfs -o slave ":{source}" "{destination}" -o uid=1000  > {fifo_name}" > /dev/null',
+            f'sudo sshfs -o slave ":{source}" "{destination}" -o uid=1000 -o allow_other > {fifo_name}" > /dev/null',
             shell=True,
         )
         time.sleep(3)
