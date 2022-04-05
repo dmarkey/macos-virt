@@ -177,6 +177,9 @@ Linux ubuntu 5.4.0-105-generic #119-Ubuntu SMP Mon Mar 7 18:49:24 UTC 2022 x86_6
 | ubuntu-21.04          | Ubuntu 21.04 Server Cloud Image                                               |
 | ubuntu-21.10          | Ubuntu 21.10 Server Cloud Image                                               |
 | ubuntu-20.04-k3s      | Ubuntu 20.04 Server Cloud Image with K3S and Docker (Qemu emulation included) |
+| ubuntu-22.04          | Ubuntu 21.10 Server Cloud Image                                               |
+| ubuntu-22.04-k3s      | Ubuntu 22.04 Server Cloud Image with K3S and Docker (Qemu emulation included) |
+
 
 ## References
 
