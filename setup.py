@@ -19,7 +19,7 @@ if mac_version < StrictVersion("12.3"):
 
 
 setup(name='macos-virt',
-      version='0.1.1',
+      version='0.2.0',
       description='MacOS utility to run Linux using Virtualization.Framework',
       author='David Markey',
       author_email='david@dmarkey.com',
@@ -36,15 +36,11 @@ setup(name='macos-virt',
       long_description=long_description,
       long_description_content_type='text/markdown',
       install_requires=[
-          'appdirs==1.4.4',
           "click==8.0.4",
           "commonmark==0.9.1",
-          "fs==2.4.15",
           "pycdlib==1.12.0",
-          "pyfatfs==1.0.3",
           "Pygments==2.11.2",
           "pyserial==3.5",
-          "pytz==2022.1",
           "PyYAML==6.0",
           "rich==12.0.0",
           "six==1.16.0",
@@ -55,7 +51,7 @@ setup(name='macos-virt',
           "macos_virt": ["macos_virt_runner/macos_virt_runner",
                          "macos_virt_runner/macos_virt_runner.entitlements",
                          "profiles/ubuntu-cloudinit.yaml"],
-          "macos_virt.service": ["install_boot.sh", "macos-virt-service.service"
+          "macos_virt.service": ["install_boot.sh", "macos-virt-service.service",
                                                     "docker-service-override.conf"],
       }
       )

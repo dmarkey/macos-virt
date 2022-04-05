@@ -5,7 +5,6 @@ network:
   renderer: networkd
   version: 2
 bootcmd:
-  - [rm, /etc/kernel/postinst.d/xx-update-initrd-links]
   - [sh, -c, " rm /usr/sbin/flash-kernel || true"]
   - [ln, -s, /bin/true, /usr/sbin/flash-kernel]
 
@@ -16,6 +15,7 @@ package_upgrade: true
 packages:
   - python3-psutil
   - sshfs
+  - udftools
 runcmd:
   - - systemctl
     - daemon-reload

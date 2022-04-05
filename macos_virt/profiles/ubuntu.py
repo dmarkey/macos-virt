@@ -2,7 +2,6 @@ import os
 import tarfile
 
 import yaml
-from fs.base import FS
 from rich.progress import Progress
 from rich.console import Console
 
@@ -32,12 +31,8 @@ class Ubuntu2004(BaseProfile):
             os.rename(os.path.join(disk_directory, cls.extracted_name), disk_full_path)
 
     @classmethod
-    def get_boot_files_from_filesystem(cls, filesystem: FS):
-        files = filesystem.listdir("/")
-
-        kernel = sorted([x for x in files if "vmlinuz" in x])[-1]
-        initrd = sorted([x for x in files if "initrd" in x])[-1]
-        return kernel, initrd
+    def get_boot_files_from_filesystem(cls, mountpoint):
+        return "vmlinuz", "initrd.img"
 
     @classmethod
     def get_kernel_url(cls):
@@ -102,15 +97,16 @@ class Ubuntu2004(BaseProfile):
         return template
 
 
-class Ubuntu2004K3S(Ubuntu2004):
-    name = "ubuntu-20.04-k3s"
-    description = (
-        "Ubuntu 20.04 Server Cloud Image with K3S and Docker (Qemu emulation included)"
-    )
+class K3sMixin:
     k3s_installer = """
-      #!/bin/sh
-      curl -sfL https://get.k3s.io | sudo INSTALL_K3S_VERSION=v1.23.3+k3s1 INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --docker" sh -
-    """
+        #!/bin/sh
+        systemctl stop unattended-upgrades
+        add-apt-repository -y ppa:canonical-server/server-backports
+        apt-get update
+        apt-get install -y docker.io qemu binfmt-support qemu-user-static
+        systemctl start unattended-upgrades
+        curl -sfL https://get.k3s.io | sudo INSTALL_K3S_VERSION=v1.23.5+k3s1 INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" sh -
+      """
 
     @classmethod
     def post_provision_customizations(cls, vm):
@@ -127,23 +123,13 @@ class Ubuntu2004K3S(Ubuntu2004):
             f.write(k3s_file_contents)
 
         console = Console()
-        console.print("[bold red]To use th VM Kubernetes/Docker, set the following environment variables.")
+        console.print("[bold red]To use Kubernetes/Docker within the VM, set the following environment variables.")
         console.print(f"export DOCKER_HOST=tcp://{vm_ip_address}")
         console.print(f"export KUBECONFIG={k3s_path}")
 
     @classmethod
     def render_cloudinit_data(cls, username, ssh_key):
         template = Ubuntu2004.render_cloudinit_data(username, ssh_key)
-        apt_sources = template.get("apt_sources", [])
-        apt_sources.append({"source": "ppa:canonical-server/server-backports"})
-        template["apt_sources"] = apt_sources
-
-        packages = template.get("packages", [])
-        packages.append("docker.io")
-        packages.append("qemu")
-        packages.append("binfmt-support")
-        packages.append("qemu-user-static")
-        template["packages"] = packages
         write_files = template.get("write_files", [])
         write_files.append({"content": cls.k3s_installer, "path": "/root/k3s-init.sh"})
         write_files.append(
@@ -160,6 +146,13 @@ class Ubuntu2004K3S(Ubuntu2004):
         runcmd.append(["bash", "/root/k3s-init.sh"])
         template["runcmd"] = runcmd
         return template
+
+
+class Ubuntu2004K3S(K3sMixin, Ubuntu2004):
+    name = "ubuntu-20.04-k3s"
+    description = (
+        "Ubuntu 20.04 Server Cloud Image with K3S and Docker (Qemu emulation included)"
+    )
 
 
 class Ubuntu2104(Ubuntu2004):
@@ -216,3 +209,39 @@ class Ubuntu2110(Ubuntu2004):
             "https://cloud-images.ubuntu.com/releases/impish/release-20220118/"
             f"ubuntu-21.10-server-cloudimg-{PLATFORM}.tar.gz"
         )
+
+
+class Ubuntu2204(Ubuntu2004):
+    name = "ubuntu-22.04"
+    extracted_name = f"jammy-server-cloudimg-{PLATFORM}.img"
+    description = "Ubuntu 22.04 Server Cloud Image"
+
+    @classmethod
+    def get_kernel_url(cls):
+        return (
+            f"https://cloud-images.ubuntu.com/"
+            f"daily/server/jammy/current/unpacked/"
+            f"jammy-server-cloudimg-{PLATFORM}-vmlinuz-generic"
+        )
+
+    @classmethod
+    def get_initrd_url(cls):
+        return (
+            f"https://cloud-images.ubuntu.com/"
+            f"daily/server/jammy/current/unpacked/"
+            f"jammy-server-cloudimg-{PLATFORM}-initrd-generic"
+        )
+
+    @classmethod
+    def get_disk_image_url(cls):
+        return (
+            "https://cloud-images.ubuntu.com/daily/server/jammy/current/"
+            f"jammy-server-cloudimg-{PLATFORM}.tar.gz"
+        )
+
+
+class Ubuntu2204K3S(K3sMixin, Ubuntu2204):
+    name = "ubuntu-22.04-k3s"
+    description = (
+        "Ubuntu 22.04 Server Cloud Image with K3S and Docker (Qemu emulation included)"
+    )

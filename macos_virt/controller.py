@@ -11,7 +11,6 @@ import time
 from io import BytesIO
 from subprocess import check_output
 
-import fs
 import pycdlib
 import serial
 import typer
@@ -358,18 +357,20 @@ class VMManager:
 
     def boot_normally(self):
         vm_disk, vm_boot_disk, cloudinit_iso = self.file_locations()
-        boot_filesystem = fs.open_fs(f"fat://{vm_boot_disk}?read_only=true")
-        kernel, initrd = self.profile.get_boot_files_from_filesystem(boot_filesystem)
+        mountpoint = subprocess.check_output(
+            ["hdiutil", "attach", "-readonly", "-imagekey", "diskimage-class=CRawDiskImage",
+             vm_boot_disk]).decode().split()[1]
+
+        kernel_path, initrd_path = self.profile.get_boot_files_from_filesystem(mountpoint)
         console.print(
-            f":floppy_disk: Booting with Kernel {kernel} and"
-            f" Ramdisk {initrd} from Boot volume"
+            f":floppy_disk: Booting with Kernel {kernel_path} and"
+            f" Ramdisk {initrd_path} from Boot volume"
         )
-        kernel_file = boot_filesystem.readbytes(kernel)
-        initrd_file = boot_filesystem.readbytes(initrd)
         with tempfile.NamedTemporaryFile(delete=True) as kernel:
-            kernel.write(kernel_file)
+            kernel.write(open(os.path.join(mountpoint, kernel_path), "rb").read())
             with tempfile.NamedTemporaryFile(delete=True) as initrd:
-                initrd.write(initrd_file)
+                initrd.write(open(os.path.join(mountpoint, initrd_path), "rb").read())
+                subprocess.check_output(["hdiutil", "detach", mountpoint])
                 self.boot_vm(kernel.name, initrd.name)
 
     def watch_initialization(self):
