@@ -33,8 +33,7 @@ rc-update add modules
 rc-update add root
 rc-update add sshd
 rc-update add local
-echo "/dev/vda      /    ext4   defaults        0 1" >> /etc/fstab
-echo 'root:password' | chpasswd
+echo "/dev/vda      /    ext4   defaults        0 0" >> /etc/fstab
 echo "hvc0::respawn:/sbin/getty -L 0 hvc0 vt100" >> /etc/inittab
 echo "alpine" > /etc/hostname
 echo "auto eth0" > /etc/network/interfaces

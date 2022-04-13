@@ -6,8 +6,14 @@ import subprocess
 import psutil
 import serial
 import time
-
-ser = serial.Serial("/dev/hvc1")
+time.sleep(3)
+while True:
+    try:
+        ser = serial.Serial("/dev/hvc1")
+    except Exception:
+        time.sleep(.5)
+    else:
+        break
 
 
 def send_json_message(message):
@@ -50,14 +56,19 @@ except subprocess.CalledProcessError:
 send_status()
 
 while True:
-    incoming = ser.readline()
-    command_parsed = json.loads(incoming)
-    if command_parsed["message_type"] == "poweroff":
-        print("Powering off")
-        os.system("poweroff")
-    if command_parsed["message_type"] == "time_update":
-        print("Updating the time")
-        os.system(f'date +%s -s @{command_parsed["time"]}')
-    if command_parsed["message_type"] == "status":
-        print("Sending status")
-        send_status()
+    try:
+        incoming = ser.readline()
+        command_parsed = json.loads(incoming)
+        message_type = command_parsed.pop("message_type", "None")
+        if message_type == "poweroff":
+            print("Powering off")
+            os.system("poweroff")
+        if message_type == "time_update":
+            print("Updating the time")
+            os.system(f'date +%s -s @{command_parsed["time"]}')
+        if message_type == "status":
+            print("Sending status")
+            send_status()
+    except:
+        time.sleep(.5)
+        pass

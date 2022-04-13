@@ -84,6 +84,7 @@ class Alpine315(BaseProfile):
             {
                 "content": open(os.path.join(PATH, "../service/service.py")).read(),
                 "path": "/usr/sbin/macos-virt-service.py",
+                'permissions': '0755'
             }
         )
         template["write_files"] = write_files

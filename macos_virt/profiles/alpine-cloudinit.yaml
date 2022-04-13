@@ -1,13 +1,26 @@
-network:
-  ethernets:
-    eth0:
-      dhcp4: true
-  version: 2
 package_update: true
 package_upgrade: true
+hostname: alpine
 runcmd:
   - - sh
     - /usr/sbin/install_boot.sh
+  - [ rc-service, macos-virt, start]
+  - [ rc-update, add, macos-virt]
+  - [ sh, -c, "echo alpine >> /etc/hostname"]
+  - [ rc-service, macos-virt, restart]
+write_files:
+  - content: |
+      #!/sbin/openrc-run
+      name="macos-virt"
+      command="/usr/sbin/macos-virt-service.py"
+      command_background="yes"
+      pidfile="/var/run/${RC_SVCNAME}.pid"
+      depend() {
+        after udev-trigger
+      }
+      rc_crashed_start=YES
+    path: /etc/init.d/macos-virt
+    permissions: '0755'
 users:
   - default
   - gecos: None
