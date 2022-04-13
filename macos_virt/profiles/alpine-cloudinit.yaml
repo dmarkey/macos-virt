@@ -1,0 +1,33 @@
+network:
+  ethernets:
+    eth0:
+      dhcp4: true
+  version: 2
+package_update: true
+package_upgrade: true
+runcmd:
+  - - sh
+    - /usr/sbin/install_boot.sh
+users:
+  - default
+  - gecos: None
+    groups:
+      - adm
+      - audio
+      - cdrom
+      - dialout
+      - dip
+      - floppy
+      - lxd
+      - netdev
+      - plugdev
+      - sudo
+      - video
+      - fuse
+    lock_passwd: false
+    name: None
+    shell: /bin/bash
+    ssh-authorized-keys:
+      - None
+    sudo:
+      - ALL=(ALL) NOPASSWD:ALL

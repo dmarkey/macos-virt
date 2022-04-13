@@ -277,7 +277,7 @@ class VMManager:
             RUNNER_PATH,
             "--pidfile=./pidfile",
             f"--kernel={kernel}",
-            "--cmdline=console=hvc0 irqfixup" " quiet root=/dev/vda",
+            "--cmdline=console=hvc0 irqfixup modules=ext4,virtio_console,isofs quiet root=/dev/vda",
             f"--initrd={initrd}",
             f"--cdrom=./{CLOUDINIT_ISO_NAME}",
             f"--disk={DISK_FILENAME}",

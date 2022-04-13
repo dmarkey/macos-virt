@@ -1,3 +1,4 @@
+#!/usr/bin/python3 -u
 import json
 import os
 import subprocess
@@ -15,6 +16,11 @@ def send_json_message(message):
 
 
 def send_status():
+    interfaces = psutil.net_if_addrs().keys()
+    main_interface = "enp0s1"
+    if "eth0" in interfaces:
+        main_interface = "eth0"
+
     output = {
         "cpu_count": psutil.cpu_count(),
         "cpu_usage": psutil.cpu_percent(),
@@ -25,7 +31,7 @@ def send_status():
         "processes": len(psutil.pids()),
         "network_addresses": [
             [x.address, x.netmask]
-            for x in psutil.net_if_addrs()["enp0s1"]
+            for x in psutil.net_if_addrs()[main_interface]
             if x.family.name == "AF_INET"
         ],
         "memory_usage": psutil.virtual_memory().percent,
