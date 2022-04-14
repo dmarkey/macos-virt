@@ -357,9 +357,9 @@ class VMManager:
 
     def boot_normally(self):
         vm_disk, vm_boot_disk, cloudinit_iso = self.file_locations()
-        mountpoint = subprocess.check_output(
+        mountpoint = " ".join(subprocess.check_output(
             ["hdiutil", "attach", "-readonly", "-imagekey", "diskimage-class=CRawDiskImage",
-             vm_boot_disk]).decode().split()[1]
+             vm_boot_disk]).decode().split()[1:])
 
         kernel_path, initrd_path = self.profile.get_boot_files_from_filesystem(mountpoint)
         console.print(
