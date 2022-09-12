@@ -360,9 +360,9 @@ class VMManager:
 
     def boot_normally(self):
         vm_disk, vm_boot_disk, cloudinit_iso = self.file_locations()
-        mountpoint = subprocess.check_output(
+        mountpoint = " ".join(subprocess.check_output(
             ["hdiutil", "attach", "-readonly", "-imagekey", "diskimage-class=CRawDiskImage",
-             vm_boot_disk]).decode().split()[1]
+             vm_boot_disk]).decode().split()[1:])
 
         boot_config = open(os.path.join(mountpoint, "boot.cfg")).read()
         boot_config = {x.split("=")[0]: "".join(x.split("=", 1)[1]) for x in boot_config.splitlines()}

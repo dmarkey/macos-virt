@@ -16,12 +16,12 @@ while True:
         break
 
 
-def send_json_message(message):
+def send_json_message(message, ser):
     dumped = json.dumps(message)
     ser.write((dumped + "\r\n").encode())
 
 
-def send_status():
+def send_status(ser):
     interfaces = psutil.net_if_addrs().keys()
     main_interface = "enp0s1"
     if "eth0" in interfaces:
@@ -42,21 +42,23 @@ def send_status():
         ],
         "memory_usage": psutil.virtual_memory().percent,
     }
-    send_json_message(output)
+    send_json_message(output, ser)
 
 
-send_json_message({"status": "initializing"})
+send_json_message({"status": "initializing"}, ser)
 
 try:
     subprocess.check_output(args=["cloud-init", "status", "--wait"])
-    send_json_message({"status": "initialization_complete"})
+    send_json_message({"status": "initialization_complete"}, ser)
 except subprocess.CalledProcessError:
-    send_json_message({"status": "initialization_error"})
+    send_json_message({"status": "initialization_error"}, ser)
 
-send_status()
+send_status(ser)
+ser.close()
 
 while True:
     try:
+        ser = serial.Serial("/dev/hvc1", timeout=10)
         incoming = ser.readline()
         command_parsed = json.loads(incoming)
         message_type = command_parsed.pop("message_type", "None")
@@ -68,7 +70,7 @@ while True:
             os.system(f'date +%s -s @{command_parsed["time"]}')
         if message_type == "status":
             print("Sending status")
-            send_status()
+            send_status(ser)
     except:
         time.sleep(.5)
         pass
