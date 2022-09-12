@@ -48,7 +48,32 @@ var globalConsoleSymlink : String? = nil
 
 var globalPidFile : String? = nil
 
+var globalVm: VZVirtualMachine? = nil
 
+var globalaslavecontrol: Int32? = nil;
+/*let signalMaskUsr1 = SIGUSR1
+let sigintSrcUsr1 = DispatchSource.makeSignalSource(signal: signalMask, queue: .main)
+sigintSrcHup.setEventHandler {
+    try? vm?.requestStop()
+
+}
+sigintSrcHup.resume()
+*/
+
+signal(SIGUSR1, SIG_IGN) // // Make sure the signal does not terminate the application.
+
+let sigusr1Src = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
+sigusr1Src.setEventHandler {
+    print("Got SIGUSR1, Attempting graceful shutdown of VM")
+    let shutdown_string = "shutdown,none"
+    write(globalaslavecontrol!, shutdown_string, shutdown_string.count)
+    try? vm?.requestStop()
+    
+
+
+}
+
+sigusr1Src.resume()
 func cleanup_files(){
       if globalControlSymlink != nil {
           try? fileManager.removeItem(atPath: (globalControlSymlink)!)
@@ -133,6 +158,9 @@ struct VMCLI: ParsableCommand {
   @Option(help: "Enable / Disable Memory Ballooning")
   var balloon: Bool = true
 
+  @Option(help: "Share Home Directory")
+  var home_dir_share: Bool = true
+    
   @Option(name: .shortAndLong, help: "Bootloader to use")
   var bootloader: BootLoader = BootLoader.linux
 
@@ -142,6 +170,9 @@ struct VMCLI: ParsableCommand {
   @Option(name: .shortAndLong, help: "Pid file to write")
   var pidfile: String?
 
+  @Option(name: .shortAndLong, help: "Control Directory")
+  var controlDirectory : String?
+    
   @Option(name: .shortAndLong, help: "Serial Console Symlink Path")
   var consoleSymlink: String?
 
@@ -193,6 +224,7 @@ struct VMCLI: ParsableCommand {
       print("Failed to open pty")
       quit(1)
     }
+    globalaslavecontrol = aslavecontrol;
     globalPidFile = pidfile
     globalConsoleSymlink = consoleSymlink
     globalControlSymlink = controlSymlink
@@ -229,7 +261,7 @@ struct VMCLI: ParsableCommand {
     NSWorkspace.shared.notificationCenter.addObserver(
       forName: NSWorkspace.didWakeNotification, object: nil, queue: nil,
       using: { _ in
-        let timeUpdateMessage =
+        /*let timeUpdateMessage =
           [
             "message_type": "time_update",
             "time": Int(Date().timeIntervalSince1970),
@@ -249,7 +281,14 @@ struct VMCLI: ParsableCommand {
         } catch {
           //do something with error
         }
-
+         */
+          var current_time = String(describing: Date().timeIntervalSince1970)
+          current_time = "time:" + current_time + "\r\n"
+          write(aslavecontrol, current_time, current_time.count)
+          
+          
+          
+          
       })
 
     // set up storage
@@ -261,11 +300,39 @@ struct VMCLI: ParsableCommand {
     for cdrom in cdroms {
       try vmCfg.storageDevices.append(openDisk(path: cdrom, readOnly: true))
     }
-    // The #available check still causes a runtime dyld error on macOS 11 (Big Sur),
-    // apparently due to a Swift bug, so add an extra check to work around this until
+      if #available(macOS 12.0, *) {
+      if (controlDirectory != nil ){
+
+              let sharedDirectory = VZSharedDirectory(url: URL(fileURLWithPath: controlDirectory!), readOnly: false)
+
+         let singleDirectoryShare = VZSingleDirectoryShare(directory: sharedDirectory)
+
+         // Create the VZVirtioFileSystemDeviceConfiguration and assign it a unique tag.
+         let sharingConfiguration = VZVirtioFileSystemDeviceConfiguration(tag: "control")
+         sharingConfiguration.share = singleDirectoryShare    // The #available check still causes a runtime dyld error on macOS 11 (Big Sur),
+          vmCfg.directorySharingDevices.append(sharingConfiguration)
+      } else {
+          // Fallback on earlier versions
+      }
+      }// apparently due to a Swift bug, so add an extra check to work around this until
     // the bug is resolved. See eg https://developer.apple.com/forums/thread/688678
     // set up networking
     // TODO: better error handling
+      if #available(macOS 12.0, *) {
+      if (controlDirectory != nil ){
+
+          let sharedDirectory = VZSharedDirectory(url: FileManager.default.homeDirectoryForCurrentUser, readOnly: false)
+
+         let singleDirectoryShare = VZSingleDirectoryShare(directory: sharedDirectory)
+
+         // Create the VZVirtioFileSystemDeviceConfiguration and assign it a unique tag.
+         let sharingConfiguration = VZVirtioFileSystemDeviceConfiguration(tag: "home")
+         sharingConfiguration.share = singleDirectoryShare    // The #available check still causes a runtime dyld error on macOS 11 (Big Sur),
+          vmCfg.directorySharingDevices.append(sharingConfiguration)
+      } else {
+          // Fallback on earlier versions
+      }
+      }
     vmCfg.networkDevices = []
     for network in networks {
       let netCfg = VZVirtioNetworkDeviceConfiguration()
@@ -303,6 +370,7 @@ struct VMCLI: ParsableCommand {
     // start VM
     vm = VZVirtualMachine(configuration: vmCfg)
     vm!.delegate = delegate
+    globalVm = vm;
 
     vm!.start(completionHandler: { (result: Result<Void, Error>) -> Void in
       switch result {

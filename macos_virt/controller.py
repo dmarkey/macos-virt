@@ -252,7 +252,7 @@ class VMManager:
         self.boot_vm(kernel, initrd)
         self.profile.post_provision_customizations(self)
 
-    def boot_vm(self, kernel, initrd):
+    def boot_vm(self, kernel, initrd, cmdline):
         try:
             kern = gzip.open(kernel)
             uncompressed = kern.read()
@@ -277,7 +277,8 @@ class VMManager:
             RUNNER_PATH,
             "--pidfile=./pidfile",
             f"--kernel={kernel}",
-            "--cmdline=console=hvc0 irqfixup modules=ext4,virtio_console,isofs,udf quiet root=/dev/vda",
+            f"--cmdline={cmdline}",
+            "--control-directory=./control_directory",
             f"--initrd={initrd}",
             f"--cdrom=./{CLOUDINIT_ISO_NAME}",
             f"--disk={DISK_FILENAME}",
@@ -288,6 +289,8 @@ class VMManager:
             "--console-symlink=console",
             "--control-symlink=control",
         ]
+        print(arguments)
+        print(self.vm_directory)
         process = subprocess.Popen(arguments, cwd=self.vm_directory)
         time.sleep(5)
         try:
@@ -361,17 +364,20 @@ class VMManager:
             ["hdiutil", "attach", "-readonly", "-imagekey", "diskimage-class=CRawDiskImage",
              vm_boot_disk]).decode().split()[1]
 
-        kernel_path, initrd_path = self.profile.get_boot_files_from_filesystem(mountpoint)
+        boot_config = open(os.path.join(mountpoint, "boot.cfg")).read()
+        boot_config = {x.split("=")[0]: "".join(x.split("=", 1)[1]) for x in boot_config.splitlines()}
+        kernel_path = glob.glob(os.path.join(mountpoint, boot_config.get("kernel_glob", "kernel.gz")))[0]
+        initrd_path = glob.glob(os.path.join(mountpoint, boot_config.get("initrd_glob", "initramfs")))[0]
         console.print(
             f":floppy_disk: Booting with Kernel {kernel_path} and"
             f" Ramdisk {initrd_path} from Boot volume"
         )
         with tempfile.NamedTemporaryFile(delete=True) as kernel:
-            kernel.write(open(os.path.join(mountpoint, kernel_path), "rb").read())
+            kernel.write(open(kernel_path, "rb").read())
             with tempfile.NamedTemporaryFile(delete=True) as initrd:
-                initrd.write(open(os.path.join(mountpoint, initrd_path), "rb").read())
+                initrd.write(open(initrd_path, "rb").read())
                 subprocess.check_output(["hdiutil", "detach", mountpoint])
-                self.boot_vm(kernel.name, initrd.name)
+                self.boot_vm(kernel.name, initrd.name, cmdline=boot_config['cmdline'])
 
     def watch_initialization(self):
         text = "🥚 VM has been created"
