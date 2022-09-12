@@ -6,27 +6,23 @@ import pathlib
 import random
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import time
-from io import BytesIO
 from subprocess import check_output
-
-import pycdlib
-import serial
 import typer
 import xdg as xdg
-import yaml
 from rich import print
 from rich.console import Console
-from rich.progress import track
+from rich.progress import track, Progress
 from rich.table import Table
+from urllib import request
 
 from macos_virt.constants import DISK_FILENAME, BOOT_DISK_FILENAME, CLOUDINIT_ISO_NAME
-from macos_virt.profiles.registry import registry
 
 MODULE_PATH = os.path.dirname(__file__)
 
-BASE_PATH = os.path.join(xdg.xdg_config_home(), "macos-virt/vms")
+BASE_PATH = os.path.join(xdg.xdg_config_home(), "macos-virt2/vms/")
 
 pathlib.Path(BASE_PATH).mkdir(parents=True, exist_ok=True)
 MB = 1024 * 1024
@@ -103,13 +99,13 @@ class VMManager:
         self.configuration = {}
         self.profile = None
 
-    def create(self, profile, cpus, memory, disk_size):
+    def create(self, package, cpus, memory, disk_size):
         if self.exists:
             raise VMExists(f"VM {self.name} already exists")
         self.configuration = {
             "memory": memory,
             "cpus": cpus,
-            "profile": profile,
+            "package": package,
             "disk_size": disk_size,
             "ip_address": None,
             "status": "uninitialized",
@@ -122,7 +118,6 @@ class VMManager:
         }
         pathlib.Path(self.vm_directory).mkdir(parents=True)
         self.save_configuration_to_disk()
-        self.profile = registry.get_profile(self.configuration["profile"])
         self.provision()
 
     def is_provisioned(self):
@@ -134,13 +129,6 @@ class VMManager:
         if not ip_address:
             raise VMHasNoAssignedAddress("VM has no assigned IP address")
         return ip_address
-
-    def file_locations(self):
-        return (
-            os.path.join(self.vm_directory, DISK_FILENAME),
-            os.path.join(self.vm_directory, BOOT_DISK_FILENAME),
-            os.path.join(self.vm_directory, CLOUDINIT_ISO_NAME),
-        )
 
     def shell(self, args, wait=False):
         if not self.is_running():
@@ -174,25 +162,11 @@ class VMManager:
         if self.is_running():
             raise VMRunning(f"🤷 VM {self.name} is already running.")
 
-        elif self.configuration["status"] == "running":
-            return self.boot_normally()
-
-        raise InternalErrorException(
-            f"VM {self.name} is in an unknown state, can't boot."
-        )
+        return self.boot_normally()
 
     def load_configuration_from_disk(self):
         self.configuration = json.load(open(self.vm_configuration_file))
-        self.profile = registry.get_profile(self.configuration["profile"])
 
-    @property
-    def get_status_port(self):
-        return serial.Serial(os.path.join(self.vm_directory, "control"), timeout=300)
-
-    def send_message(self, message):
-        ser = self.get_status_port
-        dumped = json.dumps(message)
-        ser.write((dumped + "\r\n").encode())
 
     def stop(self, force=False):
         if not self.is_running():
@@ -211,46 +185,32 @@ class VMManager:
         console.print(f":sleeping: Stop request sent to {self.name}")
 
     def provision(self):
-        vm_disk, vm_boot_disk, cloudinit_iso = self.file_locations()
-        (
-            kernel,
-            initrd,
-            disk,
-        ) = self.profile.file_locations()
-        check_output(["cp", "-c", disk, vm_disk])
+        vm_directory = self.vm_directory
+        source = request.urlopen(self.configuration['package'])
+        dest = os.path.join(vm_directory, "package.tar.gz")
+        with open(dest, "wb") as f:
+            shutil.copyfileobj(source, f)
+        with Progress() as progress:
+            progress.add_task(
+                "Extracting Files for VM", total=100, start=False
+            )
+            tf = tarfile.open(dest)
+            tf.extractall(vm_directory)
+            tf.close()
+            os.unlink(dest)
+        vm_disk = os.path.join(vm_directory, "root.img")
         mb_padding = b"\0" * MB
-        with open(vm_boot_disk, "wb") as f:
-            for _ in track(range(256), description="Creating Boot image..."):
-                f.write(mb_padding)
         size = os.path.getsize(vm_disk)
         chunks = int(((MB * self.configuration["disk_size"]) - size) / MB)
         with open(vm_disk, "ba") as f:
             for _ in track(range(chunks), description="Expanding Root Image..."):
                 f.write(mb_padding)
         ssh_key = self.get_ssh_public_key()
-        cloudinit_content = self.profile.render_cloudinit_data(USERNAME, ssh_key)
-        iso = pycdlib.PyCdlib()
-        iso.new(interchange_level=4, joliet=True, rock_ridge="1.09", vol_ident="cidata")
-        userdata = "#cloud-config\n" + yaml.dump(cloudinit_content)
-        iso.add_fp(
-            BytesIO(),
-            0,
-            "/METADATA.;1",
-            rr_name="meta-data",
-            joliet_path="/meta-data",
-        )
+        os.mkdir(os.path.join(vm_directory, "control_directory"))
+        with open(os.path.join(vm_directory, "control_directory", "ssh_key"), "w") as f:
+            f.write(ssh_key)
 
-        iso.add_fp(
-            BytesIO(userdata.encode()),
-            len(userdata),
-            "/USERDATA.;1",
-            rr_name="user-data",
-            joliet_path="/user-data",
-        )
-        iso.write(cloudinit_iso)
-        iso.close()
-        self.boot_vm(kernel, initrd)
-        self.profile.post_provision_customizations(self)
+        self.boot_normally()
 
     def boot_vm(self, kernel, initrd, cmdline):
         try:
@@ -280,32 +240,22 @@ class VMManager:
             f"--cmdline={cmdline}",
             "--control-directory=./control_directory",
             f"--initrd={initrd}",
-            f"--cdrom=./{CLOUDINIT_ISO_NAME}",
-            f"--disk={DISK_FILENAME}",
-            f"--disk={BOOT_DISK_FILENAME}",
+            f"--disk=root.img",
+            f"--disk=boot.img",
             f"--network={self.configuration['mac_address']}@nat",
             f"--cpu-count={self.configuration['cpus']}",
             f"--memory-size={self.configuration['memory']}",
             "--console-symlink=console",
-            "--control-symlink=control",
         ]
         print(arguments)
         print(self.vm_directory)
-        process = subprocess.Popen(arguments, cwd=self.vm_directory)
+        subprocess.Popen(arguments, cwd=self.vm_directory)
         time.sleep(5)
-        try:
-            serial.Serial(os.path.join(self.vm_directory, "control"), timeout=300)
-        except serial.serialutil.SerialException:
-            returncode = process.wait()
 
-            raise InternalErrorException(
-                f"VM Failed to start. " f"Return code {returncode}"
-            )
         subprocess.run(
             f"/usr/bin/screen -dm -S console-{self.name} {self.vm_directory}/console",
             shell=True,
         )
-        self.watch_initialization()
 
     def format_status(self, status):
         grid = Table.grid()
@@ -358,8 +308,11 @@ class VMManager:
         except FileNotFoundError:
             return False
 
+    def boot_disk(self):
+        return os.path.join(self.vm_directory, "boot.img")
+
     def boot_normally(self):
-        vm_disk, vm_boot_disk, cloudinit_iso = self.file_locations()
+        vm_boot_disk = self.boot_disk()
         mountpoint = " ".join(subprocess.check_output(
             ["hdiutil", "attach", "-readonly", "-imagekey", "diskimage-class=CRawDiskImage",
              vm_boot_disk]).decode().split()[1:])

@@ -6,13 +6,8 @@ from rich.console import Console
 from rich.table import Table
 
 from macos_virt.controller import Controller, VMManager
-from macos_virt.profiles.registry import registry
 
 app = typer.Typer(name="macos-virt - a utility to run Linux VMs using Virtualization.Framework")
-
-profiles = [(profile, profile) for profile in registry.profiles.keys()]
-
-profiles_enum = enum.Enum("Profiles", dict(profiles))
 
 vms = [(vm, vm) for vm in Controller.list_all_vms()]
 vms_enum = enum.Enum("VMs", dict(vms))
@@ -24,12 +19,12 @@ running_vms_enum = enum.Enum("RunningVMs", dict(running_vms))
 @app.command(help="Create a new VM")
 def create(
         name="default",
-        profile: profiles_enum = "ubuntu-20.04",
+        package="ubuntu-20.04",
         memory: int = 2048,
         cpus: int = 1,
         disk_size: int = 5000,
 ):
-    VMManager(name).create(profile.value, cpus, memory, disk_size)
+    VMManager(name).create(package, cpus, memory, disk_size)
 
 
 @app.command(help="List all VMs")
@@ -97,7 +92,6 @@ def rm(name: vms_enum):
 @app.command(help="Show Version information")
 def version():
     typer.echo(f"Macos-virt version {package_version('macos_virt')}")
-
 
 @app.command(help="Describe profiles that are available")
 def profiles():
