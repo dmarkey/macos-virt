@@ -38,14 +38,12 @@ setup(name='macos-virt',
       install_requires=[
           "click==8.0.4",
           "commonmark==0.9.1",
-          "pycdlib==1.12.0",
           "Pygments==2.11.2",
-          "pyserial==3.5",
-          "PyYAML==6.0",
           "rich==12.0.0",
           "six==1.16.0",
           "typer==0.4.0",
-          "xdg==5.1.1"
+          "xdg==5.1.1",
+          "pyfatfs==1.0.5"
       ],
       package_data={
           "macos_virt": ["macos_virt_runner/macos_virt_runner",

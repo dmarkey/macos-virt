@@ -23,8 +23,9 @@ def create(
         memory: int = 2048,
         cpus: int = 1,
         disk_size: int = 5000,
+        mount_home_directory: bool = None
 ):
-    VMManager(name).create(package, cpus, memory, disk_size)
+    VMManager(name).create(package, cpus, memory, disk_size, mount_home_directory)
 
 
 @app.command(help="List all VMs")
@@ -51,20 +52,9 @@ def status(name: running_vms_enum):
 
 
 @app.command(help="Update memory or CPU on a stopped VM")
-def update(name: vms_enum = "default", memory: int = None, cpus: int = None):
-    VMManager(name.value).update_resources(memory, cpus)
-
-
-@app.command(help="Mount a local directory into the VM")
-def mount(name: running_vms_enum, source, destination,
-          ro: bool = typer.Option(False, "--ro",
-                                  help="Mount read only.")):
-    VMManager(name.value).mount(source, destination, ro)
-
-
-@app.command(help="Unmount a directory in the VM")
-def umount(name: running_vms_enum, mountpoint):
-    VMManager(name.value).umount(mountpoint)
+def update(name: vms_enum = "default", memory: int = None,
+           cpus: int = None, mount_home_directory: bool = None):
+    VMManager(name.value).update_vm_settings(memory, cpus, mount_home_directory)
 
 
 @app.command(help="Access a shell to a running VM")
@@ -93,14 +83,15 @@ def rm(name: vms_enum):
 def version():
     typer.echo(f"Macos-virt version {package_version('macos_virt')}")
 
+
 @app.command(help="Describe profiles that are available")
 def profiles():
+    profiles = Controller.get_profiles().keys()
     console = Console()
     tab = Table()
-    tab.add_column("Profile name")
-    tab.add_column("Description")
-    for name, profile in registry.profiles.items():
-        tab.add_row(name, profile.description)
+    tab.add_column("Name")
+    for profile in profiles:
+        tab.add_row(profile)
     console.print(tab)
 
 

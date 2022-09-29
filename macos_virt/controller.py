@@ -8,7 +8,6 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
-import time
 from subprocess import check_output
 import typer
 import xdg as xdg
@@ -17,14 +16,23 @@ from rich.console import Console
 from rich.progress import track, Progress
 from rich.table import Table
 from urllib import request
+import time
+import fs
+import configparser
+import platform
+from .downloader import download
 
-from macos_virt.constants import DISK_FILENAME, BOOT_DISK_FILENAME, CLOUDINIT_ISO_NAME
+from macos_virt.constants import DISK_FILENAME, BOOT_DISK_FILENAME
 
 MODULE_PATH = os.path.dirname(__file__)
 
-BASE_PATH = os.path.join(xdg.xdg_config_home(), "macos-virt2/vms/")
+CONTROL_DIRECTORY_NAME = "control_directory"
+BASE_PATH = os.path.join(xdg.xdg_config_home(), "macos-virt2")
+VM_BASE_PATH = os.path.join(BASE_PATH, "vms")
+GENERIC_KERNELS_PATH = os.path.join(BASE_PATH, "generic_kernels")
 
-pathlib.Path(BASE_PATH).mkdir(parents=True, exist_ok=True)
+pathlib.Path(GENERIC_KERNELS_PATH).mkdir(parents=True, exist_ok=True)
+pathlib.Path(VM_BASE_PATH).mkdir(parents=True, exist_ok=True)
 MB = 1024 * 1024
 
 KEY_PATH = os.path.join(xdg.xdg_config_home(), "macos-virt/macos-virt-identity")
@@ -77,13 +85,15 @@ class InternalErrorException(BaseError):
 class ImmutableConfiguration(BaseError):
     pass
 
+class ProfileNotFound(BaseError):
+    pass
 
 class VMStarted(typer.Exit):
     code = 0
 
 
 def get_vm_directory(name):
-    path = os.path.join(BASE_PATH, name)
+    path = os.path.join(VM_BASE_PATH, name)
     pathlib.Path(path).mkdir(exist_ok=True)
     return path
 
@@ -91,7 +101,7 @@ def get_vm_directory(name):
 class VMManager:
     def __init__(self, name):
         self.name = name
-        self.vm_directory = os.path.join(BASE_PATH, name)
+        self.vm_directory = os.path.join(VM_BASE_PATH, name)
         self.vm_configuration_file = os.path.join(self.vm_directory, "vm.json")
         self.exists = False
         if os.path.exists(self.vm_configuration_file):
@@ -99,9 +109,18 @@ class VMManager:
         self.configuration = {}
         self.profile = None
 
-    def create(self, package, cpus, memory, disk_size):
+    @property
+    def control_directory(self):
+        return os.path.join(self.vm_directory, CONTROL_DIRECTORY_NAME)
+
+    def create(self, package, cpus, memory, disk_size, mount_home_directory):
         if self.exists:
             raise VMExists(f"VM {self.name} already exists")
+        if "://" not in package:
+            try:
+                package = Controller.get_profiles()[package]
+            except KeyError:
+                raise ProfileNotFound(f"{package} not found")
         self.configuration = {
             "memory": memory,
             "cpus": cpus,
@@ -109,6 +128,7 @@ class VMManager:
             "disk_size": disk_size,
             "ip_address": None,
             "status": "uninitialized",
+            "mount_home_directory": mount_home_directory,
             "mac_address": "52:54:00:%02x:%02x:%02x"
                            % (
                                random.randint(0, 255),
@@ -123,12 +143,15 @@ class VMManager:
     def is_provisioned(self):
         return self.configuration.get("status") == "running"
 
+    def read_control_file(self, filename):
+        try:
+            with open(os.path.join(self.control_directory, filename)) as f:
+                return f.read()
+        except FileNotFoundError:
+            return ""
+
     def get_ip_address(self):
-        self.load_configuration_from_disk()
-        ip_address = self.configuration.get("ip_address", None)
-        if not ip_address:
-            raise VMHasNoAssignedAddress("VM has no assigned IP address")
-        return ip_address
+        return self.read_control_file("ip").strip().split("\n")[-1]
 
     def shell(self, args, wait=False):
         if not self.is_running():
@@ -167,7 +190,6 @@ class VMManager:
     def load_configuration_from_disk(self):
         self.configuration = json.load(open(self.vm_configuration_file))
 
-
     def stop(self, force=False):
         if not self.is_running():
             raise VMNotRunning(f"🤷 VM {self.name} is not running")
@@ -181,21 +203,24 @@ class VMManager:
                 console.print(f":skull: VM  {self.name} terminated by force")
                 return
 
-        self.send_message({"message_type": "poweroff"})
+        with open(os.path.join(self.control_directory, "poweroff"), "w") as f:
+            f.close()
         console.print(f":sleeping: Stop request sent to {self.name}")
 
     def provision(self):
         vm_directory = self.vm_directory
+        download([{"from": self.configuration['package'], "to": os.path.join(
+            self.vm_directory, "package.tar.gz")}])
         source = request.urlopen(self.configuration['package'])
         dest = os.path.join(vm_directory, "package.tar.gz")
-        with open(dest, "wb") as f:
-            shutil.copyfileobj(source, f)
         with Progress() as progress:
             progress.add_task(
                 "Extracting Files for VM", total=100, start=False
             )
             tf = tarfile.open(dest)
-            tf.extractall(vm_directory)
+            tf.extract("root.img", path=vm_directory)
+            tf.extract("boot.img", path=vm_directory)
+            tf.extract("boot.cfg", path=vm_directory)
             tf.close()
             os.unlink(dest)
         vm_disk = os.path.join(vm_directory, "root.img")
@@ -206,13 +231,13 @@ class VMManager:
             for _ in track(range(chunks), description="Expanding Root Image..."):
                 f.write(mb_padding)
         ssh_key = self.get_ssh_public_key()
-        os.mkdir(os.path.join(vm_directory, "control_directory"))
-        with open(os.path.join(vm_directory, "control_directory", "ssh_key"), "w") as f:
+        os.mkdir(self.control_directory)
+        with open(os.path.join(self.control_directory, "ssh_key"), "w") as f:
             f.write(ssh_key)
 
         self.boot_normally()
 
-    def boot_vm(self, kernel, initrd, cmdline):
+    def boot_vm(self, kernel, initrd=None, cmdline=None):
         try:
             kern = gzip.open(kernel)
             uncompressed = kern.read()
@@ -238,37 +263,33 @@ class VMManager:
             "--pidfile=./pidfile",
             f"--kernel={kernel}",
             f"--cmdline={cmdline}",
-            "--control-directory=./control_directory",
-            f"--initrd={initrd}",
-            f"--disk=root.img",
-            f"--disk=boot.img",
+            f"--control-directory={CONTROL_DIRECTORY_NAME}",
+            f"--disk={DISK_FILENAME}",
+            f"--disk={BOOT_DISK_FILENAME}",
             f"--network={self.configuration['mac_address']}@nat",
             f"--cpu-count={self.configuration['cpus']}",
             f"--memory-size={self.configuration['memory']}",
             "--console-symlink=console",
         ]
-        print(arguments)
-        print(self.vm_directory)
-        subprocess.Popen(arguments, cwd=self.vm_directory)
-        time.sleep(5)
+        if initrd:
+            arguments.append(f"--initrd={initrd}",)
 
+        if self.configuration.get("mount_home_directory", False):
+            with open(os.path.join(self.control_directory, "mnt_usr_directory"), "w") as f:
+                f.write(os.path.expanduser('~'))
+            arguments.append("--home_dir_share=true")
+        else:
+            try:
+                os.remove(os.path.join(self.control_directory, "mnt_usr_directory"))
+                arguments.append("--home_dir_share=false")
+            except OSError:
+                pass
+        subprocess.Popen(arguments, cwd=self.vm_directory)
+        time.sleep(1)
         subprocess.run(
             f"/usr/bin/screen -dm -S console-{self.name} {self.vm_directory}/console",
             shell=True,
         )
-
-    def format_status(self, status):
-        grid = Table.grid()
-        grid.add_column(width=40)
-        grid.add_column(style="bold")
-        grid.add_row("Uptime", str(status.get("uptime")) + " seconds")
-        grid.add_row("CPU Count", str(status["cpu_count"]))
-        grid.add_row("CPU Usage", str(status["cpu_usage"]) + "%")
-        grid.add_row("Process Count", str(status.get("processes")))
-        grid.add_row("Memory Usage", str(status["memory_usage"]) + "%")
-        grid.add_row("Root Filesystem Usage", str(status["root_fs_usage"]) + "%")
-        grid.add_row("Network Addresses", str(status["network_addresses"]))
-        print(grid)
 
     def save_configuration_to_disk(self):
         with open(os.path.join(self.vm_directory, "vm.json"), "w") as f:
@@ -309,50 +330,58 @@ class VMManager:
             return False
 
     def boot_disk(self):
-        return os.path.join(self.vm_directory, "boot.img")
+        return os.path.join(self.vm_directory, BOOT_DISK_FILENAME)
+
+    def get_generic_kernel(self):
+        test_kernel_path = os.path.join(GENERIC_KERNELS_PATH, "test-kernel")
+        if os.path.exists(test_kernel_path):
+            print("Booting with test kernel")
+            return test_kernel_path
+        resp = request.urlopen("https://api.github.com/"
+                               "repos/dmarkey/macos-virt-kernel/releases")
+        releases = json.loads(resp.read().decode())
+        latest_release = [x for x in releases if x['assets']][0]
+        version = releases[0]['tag_name']
+        latest_kernel_path = os.path.join(GENERIC_KERNELS_PATH, version)
+        if not os.path.exists(latest_kernel_path):
+            latest_kernel =  [ x for x in latest_release['assets'] if
+                               x['name'] == "vmlinuz" ][0]['browser_download_url']
+            download([{"from": latest_kernel, "to": latest_kernel_path }])
+        return latest_kernel_path
 
     def boot_normally(self):
-        vm_boot_disk = self.boot_disk()
-        mountpoint = " ".join(subprocess.check_output(
-            ["hdiutil", "attach", "-readonly", "-imagekey", "diskimage-class=CRawDiskImage",
-             vm_boot_disk]).decode().split()[1:])
-
-        boot_config = open(os.path.join(mountpoint, "boot.cfg")).read()
-        boot_config = {x.split("=")[0]: "".join(x.split("=", 1)[1]) for x in boot_config.splitlines()}
-        kernel_path = glob.glob(os.path.join(mountpoint, boot_config.get("kernel_glob", "kernel.gz")))[0]
-        initrd_path = glob.glob(os.path.join(mountpoint, boot_config.get("initrd_glob", "initramfs")))[0]
-        console.print(
-            f":floppy_disk: Booting with Kernel {kernel_path} and"
-            f" Ramdisk {initrd_path} from Boot volume"
-        )
-        with tempfile.NamedTemporaryFile(delete=True) as kernel:
-            kernel.write(open(kernel_path, "rb").read())
-            with tempfile.NamedTemporaryFile(delete=True) as initrd:
-                initrd.write(open(initrd_path, "rb").read())
-                subprocess.check_output(["hdiutil", "detach", mountpoint])
-                self.boot_vm(kernel.name, initrd.name, cmdline=boot_config['cmdline'])
-
-    def watch_initialization(self):
-        text = "🥚 VM has been created"
-
-        console.print(text)
-        port = self.get_status_port
-
-        while True:
-            status = json.loads(port.readline().decode())
-            if self.update_vm_status(status):
-                break
-
-    def get_status_obj(self):
-        if not self.is_running():
-            raise VMNotRunning("VM {self.name} is not running.")
-        self.send_message({"message_type": "status"})
-        port = self.get_status_port
-        return json.loads(port.readline().decode())
-
-    def print_realtime_status(self):
-        status_obj = self.get_status_obj()
-        self.format_status(status_obj)
+        config = configparser.ConfigParser()
+        config.read(os.path.join(self.vm_directory, "boot.cfg"))
+        config = config['macos-virt-boot-config']
+        cmdline = config['cmdline']
+        if platform.machine() == "arm64" and (
+                config.get("generic_arm64_kernel", "false").lower() == "true"):
+            kernel_path = self.get_generic_kernel()
+            console.print(
+                f":floppy_disk: Booting with generic arm64 kernel {kernel_path}"
+                f" and kernel command line {cmdline}"
+            )
+            self.boot_vm(kernel_path, cmdline=cmdline)
+        else:
+            vm_boot_disk = self.boot_disk()
+            with fs.open_fs(f"fat://{vm_boot_disk}?read_only=true") as fat32_boot_disk:
+                vm_boot_disk = self.boot_disk()
+                fat32_boot_disk = fs.open_fs(f"fat://{vm_boot_disk}?read_only=true")
+                kernel_path = \
+                sorted([x.path for x in fat32_boot_disk.glob(config["kernel_glob"])])[0]
+                initrd_path = \
+                sorted([x.path for x in fat32_boot_disk.glob(config["initrd_glob"])])[0]
+                console.print(
+                    f":floppy_disk: Booting with Kernel {kernel_path} and"
+                    f" Ramdisk {initrd_path} from Boot volume"
+                    f" and kernel command line {cmdline}"
+                )
+                with tempfile.NamedTemporaryFile(delete=True) as kernel:
+                    kernel.write(fat32_boot_disk.open(kernel_path, "rb").read())
+                    with tempfile.NamedTemporaryFile(delete=True) as initrd:
+                        initrd.write(fat32_boot_disk.open(initrd_path, "rb").read())
+                        self.boot_vm(kernel.name, initrd=initrd.name,
+                                     cmdline=config['cmdline'])
 
     def delete(self):
         if not self.exists:
@@ -388,48 +417,11 @@ class VMManager:
                     ] + args
         check_output(full_args)
 
-    def list_mounts(self):
-        if not self.is_running():
-            raise VMNotRunning(f"🤷 VM {self.name} is not running.")
-        status = self.get_status_obj()
-        return [x.split(" ")[1] for x in status['mounts'].splitlines()
-                if "fuse.sshfs" in x]
-
-    def mount(self, source, destination, ro=False):
-        if not self.is_running():
-            raise VMNotRunning(f"🤷 VM {self.name} is not running.")
-        source = os.path.abspath(source)
-        if not os.path.isdir(source):
-            raise InternalErrorException(f"{source} is not a directory")
-        fifo_name = os.path.join(self.vm_directory, f"sshfs-fifo-{os.getpid()}")
-        os.mkfifo(fifo_name)
-        self.shell(
-            f"sudo mkdir -p {destination} && sudo chown 1000 {destination}", wait=True
-        )
-        if ro:
-            ro_string = " -R "
-        else:
-            ro_string = ""
-
-        subprocess.Popen(
-            f'nohup sh -c "< {fifo_name} /usr/libexec/sftp-server {ro_string} | '
-            f"ssh -c aes128-ctr -o Compression=no -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "
-            f"-i {KEY_PATH} {USERNAME}@{self.get_ip_address()} "
-            f'sudo sshfs -o slave ":{source}" "{destination}" -o uid=1000 -o allow_other > {fifo_name}" > /dev/null',
-            shell=True,
-        )
-        time.sleep(3)
-        fuse_mounts = self.list_mounts()
-        if destination in fuse_mounts:
-            console.print(f":computer_disk: {source} successfully mounted to {destination}")
-        else:
-            console.print(f":broken_heart: {destination} was not mounted successfully")
-
-    def update_resources(self, memory, cpus):
+    def update_vm_settings(self, memory, cpus, mount_home_directory):
         if self.is_running():
             raise VMRunning(
                 f"🤷 VM {self.name} is running, "
-                f"Please shut it down before updating resources."
+                f"Please shut it down before updating settings."
             )
         self.load_configuration_from_disk()
         if memory:
@@ -438,32 +430,41 @@ class VMManager:
                 f"{self.configuration['memory']} to {memory}"
             )
             self.configuration["memory"] = memory
+        if mount_home_directory is not None:
+            self.configuration["mount_home_directory"] = mount_home_directory
         if cpus:
             self.configuration["cpus"] = cpus
             console.print(
                 f":rocket: changing CPUs from "
                 f"{self.configuration['cpus']} to {cpus}"
             )
-        if memory or cpus:
+        if memory or cpus or mount_home_directory is not None:
             self.save_configuration_to_disk()
         else:
             console.print(f"🤷 You didn't ask to change anything.")
 
-    def umount(self, mountpoint):
-        mounts = self.list_mounts()
-        if mountpoint not in mounts:
-            raise InternalErrorException(
-                f"🤷 VM {self.name} has no mountpoint {mountpoint}")
-        self.shell(args=f"sudo umount {mountpoint}", wait=True)
-        console.print(f"❌ Mountpoint {mountpoint} unmounted.")
-
 
 class Controller:
+
+    @classmethod
+    def get_profiles(cls):
+        resp = request.urlopen("https://api.github.com/"
+                               "repos/dmarkey/macos-virt-images/releases")
+        releases = json.loads(resp.read().decode())
+        latest_release = [x for x in releases if x['assets']][0]
+        arch = platform.machine()
+        linux_arch = "x86_64"
+        if arch == "arm64":
+            linux_arch = "aarch64"
+        profiles = { x['name'][:-8-len(linux_arch)]: x['browser_download_url']
+                     for x in latest_release['assets'] if linux_arch in x['name']}
+        return profiles
+
     @classmethod
     def list_all_vms(cls):
         return [
             os.path.basename(os.path.dirname(x))
-            for x in glob.glob(f"{BASE_PATH}/*/vm.json")
+            for x in glob.glob(f"{VM_BASE_PATH}/*/vm.json")
         ]
 
     @classmethod
@@ -477,7 +478,6 @@ class Controller:
         table = Table()
         table.add_column("VM Name", width=35)
         table.add_column("IP Address")
-        table.add_column("Profile")
         table.add_column("CPUs")
         table.add_column("Memory")
         table.add_column("Status")
@@ -499,7 +499,6 @@ class Controller:
                 table.add_row(
                     vm,
                     ip_address,
-                    configuration["profile"],
                     str(configuration["cpus"]),
                     str(configuration["memory"]),
                     status,

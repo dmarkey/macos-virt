@@ -1,5 +1,2 @@
-KERNAL_FILENAME = "kernel"
-INITRD_FILENAME = "initrd"
-DISK_FILENAME = "disk.img"
+DISK_FILENAME = "root.img"
 BOOT_DISK_FILENAME = "boot.img"
-CLOUDINIT_ISO_NAME = "cloudinit.img"

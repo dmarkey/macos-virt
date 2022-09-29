@@ -159,7 +159,7 @@ struct VMCLI: ParsableCommand {
   var balloon: Bool = true
 
   @Option(help: "Share Home Directory")
-  var home_dir_share: Bool = true
+  var home_dir_share: Bool = false
     
   @Option(name: .shortAndLong, help: "Bootloader to use")
   var bootloader: BootLoader = BootLoader.linux
@@ -261,32 +261,9 @@ struct VMCLI: ParsableCommand {
     NSWorkspace.shared.notificationCenter.addObserver(
       forName: NSWorkspace.didWakeNotification, object: nil, queue: nil,
       using: { _ in
-        /*let timeUpdateMessage =
-          [
-            "message_type": "time_update",
-            "time": Int(Date().timeIntervalSince1970),
-          ] as [String: Any]
-
-        do {
-          var jsonData = try JSONSerialization.data(withJSONObject: timeUpdateMessage)
-
-          jsonData.append(13)
-          jsonData.append(10)
-
-          jsonData.withUnsafeBytes { rawBufferPointer in
-            let rawPtr = rawBufferPointer.baseAddress!
-            write(aslavecontrol, rawPtr, rawBufferPointer.count)
-          }
-          //do something with myStruct
-        } catch {
-          //do something with error
-        }
-         */
-          var current_time = String(describing: Date().timeIntervalSince1970)
-          current_time = "time:" + current_time + "\r\n"
-          write(aslavecontrol, current_time, current_time.count)
           
-          
+          let f = open("time_sync", 4)
+          close(f)
           
           
       })
@@ -319,14 +296,14 @@ struct VMCLI: ParsableCommand {
     // set up networking
     // TODO: better error handling
       if #available(macOS 12.0, *) {
-      if (controlDirectory != nil ){
+      if (home_dir_share){
 
           let sharedDirectory = VZSharedDirectory(url: FileManager.default.homeDirectoryForCurrentUser, readOnly: false)
 
          let singleDirectoryShare = VZSingleDirectoryShare(directory: sharedDirectory)
 
          // Create the VZVirtioFileSystemDeviceConfiguration and assign it a unique tag.
-         let sharingConfiguration = VZVirtioFileSystemDeviceConfiguration(tag: "home")
+         let sharingConfiguration = VZVirtioFileSystemDeviceConfiguration(tag: "user-home")
          sharingConfiguration.share = singleDirectoryShare    // The #available check still causes a runtime dyld error on macOS 11 (Big Sur),
           vmCfg.directorySharingDevices.append(sharingConfiguration)
       } else {
