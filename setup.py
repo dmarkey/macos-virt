@@ -48,6 +48,7 @@ setup(name='macos-virt',
       package_data={
           "macos_virt": ["macos_virt_runner/macos_virt_runner",
                          "macos_virt_runner/macos_virt_runner.entitlements",
+                         "service.sh",
                          ],
       }
       )

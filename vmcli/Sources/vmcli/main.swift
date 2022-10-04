@@ -1,367 +1,138 @@
-import ArgumentParser
-import Darwin.C
-import Foundation
+//
+//  main.swift
+//  virt
+//
+//  Created by Alexander Pinske on 06.12.20.
+//
+
 import Virtualization
 
-enum BootLoader: String, ExpressibleByArgument {
-  case linux
-}
-
-enum SizeSuffix: UInt64, ExpressibleByArgument {
-  case none = 1
-  case
-    KB = 1000
-  case KiB = 0x400
-  case
-    MB = 1_000_000
-  case MiB = 0x100000
-  case
-    GB = 1_000_000_000
-  case GiB = 0x4000_0000
-}
-var vm: VZVirtualMachine? = nil
-
-var stopRequested = false
-
-// mask TERM signals so we can perform clean up
-let signalMask = SIGPIPE | SIGINT | SIGTERM
-signal(signalMask, SIG_IGN)
-let sigintSrc = DispatchSource.makeSignalSource(signal: signalMask, queue: .main)
-sigintSrc.setEventHandler {
-  
-  quit(1)
-}
-sigintSrc.resume()
-
-// mask TERM signals so we can perform clean up
-let signalMaskHup = SIGHUP
-signal(signalMaskHup, SIG_IGN)
-let sigintSrcHup = DispatchSource.makeSignalSource(signal: signalMask, queue: .main)
-sigintSrcHup.setEventHandler {
-
-}
-sigintSrcHup.resume()
-
-var globalControlSymlink : String? = nil
-
-var globalConsoleSymlink : String? = nil
-
-var globalPidFile : String? = nil
-
-var globalVm: VZVirtualMachine? = nil
-
-var globalaslavecontrol: Int32? = nil;
-/*let signalMaskUsr1 = SIGUSR1
-let sigintSrcUsr1 = DispatchSource.makeSignalSource(signal: signalMask, queue: .main)
-sigintSrcHup.setEventHandler {
-    try? vm?.requestStop()
-
-}
-sigintSrcHup.resume()
-*/
-
-signal(SIGUSR1, SIG_IGN) // // Make sure the signal does not terminate the application.
-
-let sigusr1Src = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
-sigusr1Src.setEventHandler {
-    print("Got SIGUSR1, Attempting graceful shutdown of VM")
-    let shutdown_string = "shutdown,none"
-    write(globalaslavecontrol!, shutdown_string, shutdown_string.count)
-    try? vm?.requestStop()
+struct ConfigObj: Decodable {
+    let cpus: Int
+    let memory: Int
+    let share_home: Bool
+    let mac: String
+    let kernel: String
+    let cmdline: String
+    let initrd: String!
     
-
-
 }
-
-sigusr1Src.resume()
-func cleanup_files(){
-      if globalControlSymlink != nil {
-          try? fileManager.removeItem(atPath: (globalControlSymlink)!)
-      }
-
-      if globalConsoleSymlink != nil {
-          try? fileManager.removeItem(atPath: (globalConsoleSymlink)!)
-
-      }
-      if globalPidFile != nil {
-          try? fileManager.removeItem(atPath: (globalPidFile)!)
-      }
-
-  }
-
-func quit(_ code: Int32) -> Never {
-  cleanup_files()
-  return exit(code)
-}
-
-func openDisk(path: String, readOnly: Bool) throws -> VZVirtioBlockDeviceConfiguration {
-  let vmDiskURL = URL(fileURLWithPath: path)
-  let vmDisk: VZDiskImageStorageDeviceAttachment
-  do {
-    vmDisk = try VZDiskImageStorageDeviceAttachment(url: vmDiskURL, readOnly: readOnly)
-  } catch {
-    throw error
-  }
-  let vmBlockDevCfg = VZVirtioBlockDeviceConfiguration(attachment: vmDisk)
-  return vmBlockDevCfg
-}
-
-
-class VMCLIDelegate: NSObject, VZVirtualMachineDelegate {
-  func guestDidStop(_ virtualMachine: VZVirtualMachine) {
-    quit(0)
-  }
-  func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {
-    quit(1)
-  }
-}
-
-let delegate = VMCLIDelegate()
-
-let vmCfg = VZVirtualMachineConfiguration()
 
 let fileManager = FileManager()
 
-struct VMCLI: ParsableCommand {
-  @Option(name: .shortAndLong, help: "CPU count")
-  var cpuCount: Int = 1
+func cleanup_files(){
 
-  @Option(name: .shortAndLong, help: "Memory Bytes")
-  var memorySize: UInt64 = 512  // 512 MiB default
-
-  @Option(name: .long, help: "Memory Size Suffix")
-  var memorySizeSuffix: SizeSuffix = SizeSuffix.MiB
-
-  @Option(name: [.short, .customLong("disk")], help: "Disks to use")
-  var disks: [String] = []
-
-  @Option(name: [.customLong("cdrom")], help: "CD-ROMs to use")
-  var cdroms: [String] = []
-
-  #if EXTRA_WORKAROUND_FOR_BIG_SUR
-    // See comment below for similar #if
-  #else
-    @available(macOS 12, *)
-    @Option(name: [.short, .customLong("folder")], help: "Folders to share")
-    var folders: [String] = []
-  #endif
-
-  @Option(
-    name: [.short, .customLong("network")],
-    help: """
-      Networks to use. e.g. aa:bb:cc:dd:ee:ff@nat for a nat device, \
-      or ...@en0 for bridging to en0. \
-      Omit mac address for a generated address.
-      """)
-  var networks: [String] = ["nat"]
-
-  @Option(help: "Enable / Disable Memory Ballooning")
-  var balloon: Bool = true
-
-  @Option(help: "Share Home Directory")
-  var home_dir_share: Bool = false
-    
-  @Option(name: .shortAndLong, help: "Bootloader to use")
-  var bootloader: BootLoader = BootLoader.linux
-
-  @Option(name: .shortAndLong, help: "Kernel to use")
-  var kernel: String?
-
-  @Option(name: .shortAndLong, help: "Pid file to write")
-  var pidfile: String?
-
-  @Option(name: .shortAndLong, help: "Control Directory")
-  var controlDirectory : String?
-    
-  @Option(name: .shortAndLong, help: "Serial Console Symlink Path")
-  var consoleSymlink: String?
-
-  @Option(name: .shortAndLong, help: "Serial Control Symlink Path")
-  var controlSymlink: String?
-
-  @Option(help: "Initrd to use")
-  var initrd: String?
-
-  @Option(help: "Kernel cmdline to use")
-  var cmdline: String?
-
-  @Option(help: "Escape Sequence, when using a tty")
-  var escapeSequence: String = "q"
-
-  func run() throws {
-    vmCfg.cpuCount = cpuCount
-    vmCfg.memorySize = memorySize * memorySizeSuffix.rawValue
-
-    // set up bootloader
-    switch bootloader {
-    case BootLoader.linux:
-      if kernel == nil {
-        throw ValidationError("Kernel not specified")
-      }
-      let vmKernelURL = URL(fileURLWithPath: kernel!)
-      let vmBootLoader = VZLinuxBootLoader(kernelURL: vmKernelURL)
-      if initrd != nil {
-        vmBootLoader.initialRamdiskURL = URL(fileURLWithPath: initrd!)
-      }
-      if cmdline != nil {
-        vmBootLoader.commandLine = cmdline!
-      }
-      vmCfg.bootLoader = vmBootLoader
-    }
-
-    // set up tty
-    //let vmSerialIn = Pipe()
-    //let vmSerialOut = Pipe()
-    var amasterconsole: Int32 = 0
-    var aslaveconsole: Int32 = 0
-    if openpty(&amasterconsole, &aslaveconsole, nil, nil, nil) == -1 {
-      print("Failed to open pty")
-      quit(1)
-    }
-    var amastercontrol: Int32 = 0
-    var aslavecontrol: Int32 = 0
-    if openpty(&amastercontrol, &aslavecontrol, nil, nil, nil) == -1 {
-      print("Failed to open pty")
-      quit(1)
-    }
-    globalaslavecontrol = aslavecontrol;
-    globalPidFile = pidfile
-    globalConsoleSymlink = consoleSymlink
-    globalControlSymlink = controlSymlink
-    if controlSymlink != nil {
-      try? fileManager.createSymbolicLink(
-        atPath: controlSymlink!, withDestinationPath: String(cString: ttyname(aslavecontrol)))
-
-    }
-
-    if consoleSymlink != nil {
-      try? fileManager.createSymbolicLink(
-        atPath: consoleSymlink!, withDestinationPath: String(cString: ttyname(aslaveconsole)))
-
-    }
-
-    if pidfile != nil {
-      let pid = String(getpid())
-      fileManager.createFile(atPath: pidfile!, contents: pid.data(using: .utf8))
-    }
-    let vmConsoleCfg = VZVirtioConsoleDeviceSerialPortConfiguration()
-    let vmSerialPort = VZFileHandleSerialPortAttachment(
-      fileHandleForReading: FileHandle(fileDescriptor: amasterconsole),
-      fileHandleForWriting: FileHandle(fileDescriptor: amasterconsole)
-    )
-    let vmControlCfg = VZVirtioConsoleDeviceSerialPortConfiguration()
-
-    let vmSerialPortControl = VZFileHandleSerialPortAttachment(
-      fileHandleForReading: FileHandle(fileDescriptor: amastercontrol),
-      fileHandleForWriting: FileHandle(fileDescriptor: amastercontrol)
-    )
-    vmConsoleCfg.attachment = vmSerialPort
-    vmControlCfg.attachment = vmSerialPortControl
-    vmCfg.serialPorts = [vmConsoleCfg, vmControlCfg]
-    NSWorkspace.shared.notificationCenter.addObserver(
-      forName: NSWorkspace.didWakeNotification, object: nil, queue: nil,
-      using: { _ in
-          
-          let f = open("time_sync", 4)
-          close(f)
-          
-          
-      })
-
-    // set up storage
-    // TODO: better error handling
-    vmCfg.storageDevices = []
-    for disk in disks {
-      try vmCfg.storageDevices.append(openDisk(path: disk, readOnly: false))
-    }
-    for cdrom in cdroms {
-      try vmCfg.storageDevices.append(openDisk(path: cdrom, readOnly: true))
-    }
-      if #available(macOS 12.0, *) {
-      if (controlDirectory != nil ){
-
-              let sharedDirectory = VZSharedDirectory(url: URL(fileURLWithPath: controlDirectory!), readOnly: false)
-
-         let singleDirectoryShare = VZSingleDirectoryShare(directory: sharedDirectory)
-
-         // Create the VZVirtioFileSystemDeviceConfiguration and assign it a unique tag.
-         let sharingConfiguration = VZVirtioFileSystemDeviceConfiguration(tag: "control")
-         sharingConfiguration.share = singleDirectoryShare    // The #available check still causes a runtime dyld error on macOS 11 (Big Sur),
-          vmCfg.directorySharingDevices.append(sharingConfiguration)
-      } else {
-          // Fallback on earlier versions
-      }
-      }// apparently due to a Swift bug, so add an extra check to work around this until
-    // the bug is resolved. See eg https://developer.apple.com/forums/thread/688678
-    // set up networking
-    // TODO: better error handling
-      if #available(macOS 12.0, *) {
-      if (home_dir_share){
-
-          let sharedDirectory = VZSharedDirectory(url: FileManager.default.homeDirectoryForCurrentUser, readOnly: false)
-
-         let singleDirectoryShare = VZSingleDirectoryShare(directory: sharedDirectory)
-
-         // Create the VZVirtioFileSystemDeviceConfiguration and assign it a unique tag.
-         let sharingConfiguration = VZVirtioFileSystemDeviceConfiguration(tag: "user-home")
-         sharingConfiguration.share = singleDirectoryShare    // The #available check still causes a runtime dyld error on macOS 11 (Big Sur),
-          vmCfg.directorySharingDevices.append(sharingConfiguration)
-      } else {
-          // Fallback on earlier versions
-      }
-      }
-    vmCfg.networkDevices = []
-    for network in networks {
-      let netCfg = VZVirtioNetworkDeviceConfiguration()
-      let parts = network.split(separator: "@")
-      var device = String(parts[0])
-      if parts.count > 1 {
-        netCfg.macAddress = VZMACAddress(string: String(parts[0]))!
-        device = String(parts[1])
-      }
-      switch device {
-      case "nat":
-        netCfg.attachment = VZNATNetworkDeviceAttachment()
-      default:
-        for iface in VZBridgedNetworkInterface.networkInterfaces {
-          if iface.identifier == network {
-            netCfg.attachment = VZBridgedNetworkDeviceAttachment(interface: iface)
-            break
-          }
-        }
-        if netCfg.attachment == nil {
-          throw ValidationError("Cannot find network: \(network)")
-        }
-      }
-      vmCfg.networkDevices.append(netCfg)
-    }
-
-    // set up memory balloon
-    let balloonCfg = VZVirtioTraditionalMemoryBalloonDeviceConfiguration()
-    vmCfg.memoryBalloonDevices = [balloonCfg]
-
-    vmCfg.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
-
-    try vmCfg.validate()
-
-    // start VM
-    vm = VZVirtualMachine(configuration: vmCfg)
-    vm!.delegate = delegate
-    globalVm = vm;
-
-    vm!.start(completionHandler: { (result: Result<Void, Error>) -> Void in
-      switch result {
-      case .success:
-        return
-      case .failure(let error):
-        FileHandle.standardError.write(error.localizedDescription.data(using: .utf8)!)
-        FileHandle.standardError.write("\n".data(using: .utf8)!)
-        quit(1)
-      }
-    })
-
-    RunLoop.main.run()
+    try? fileManager.removeItem(atPath: "pid.file")
+ 
   }
+
+let data = try Data(contentsOf: URL(fileURLWithPath: "./boot_config.json"))
+let vmConfig: ConfigObj = try! JSONDecoder().decode(ConfigObj.self, from: data)
+let verbose = CommandLine.arguments.contains("-v")
+
+let tcattr = UnsafeMutablePointer<termios>.allocate(capacity: 1)
+tcgetattr(FileHandle.standardInput.fileDescriptor, tcattr)
+let oldValue = tcattr.pointee.c_lflag
+atexit {
+    tcattr.pointee.c_lflag = oldValue
+    tcsetattr(FileHandle.standardInput.fileDescriptor, TCSAFLUSH, tcattr)
+    tcattr.deallocate()
+}
+tcattr.pointee.c_lflag &= ~UInt(ECHO | ICANON | ISIG)
+tcsetattr(FileHandle.standardInput.fileDescriptor, TCSAFLUSH, tcattr)
+
+let config = VZVirtualMachineConfiguration()
+config.cpuCount = vmConfig.cpus
+config.memorySize = UInt64(vmConfig.memory * 1024 * 1024)
+
+do {
+    let vda = try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: "root.img"), readOnly: false)
+    let vdb = try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: "boot.img"), readOnly: false)
+    config.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: vda), VZVirtioBlockDeviceConfiguration(attachment: vdb)]
+} catch {
+    fatalError("Virtual Machine Storage Error: \(error)")
 }
 
-VMCLI.main()
+config.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
+
+let network = VZVirtioNetworkDeviceConfiguration()
+network.macAddress = VZMACAddress(string: vmConfig.mac)!
+
+network.attachment = VZNATNetworkDeviceAttachment()
+config.networkDevices = [network]
+
+let bootloader = VZLinuxBootLoader(kernelURL: URL(fileURLWithPath: vmConfig.kernel))
+if vmConfig.initrd != nil{
+    bootloader.initialRamdiskURL = URL(fileURLWithPath: vmConfig.initrd)
+}
+bootloader.commandLine = vmConfig.cmdline
+config.bootLoader = bootloader
+
+
+if #available(macOS 12.0, *) {
+    let fs0 = VZVirtioFileSystemDeviceConfiguration(tag: "control")
+    fs0.share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: URL(fileURLWithPath: "control_directory"), readOnly: false))
+    
+    config.directorySharingDevices = [fs0]
+    
+    if vmConfig.share_home {
+    let fs1 = VZVirtioFileSystemDeviceConfiguration(tag: "user-home")
+    fs1.share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: FileManager.default.homeDirectoryForCurrentUser, readOnly: false))
+    config.directorySharingDevices += [fs1]
+    }
+} else {
+    // Fallback on earlier versions
+}
+
+
+/*#if compiler(>=5.7)
+if VZLinuxRosettaDirectoryShare.availability == .installed {
+    let rosetta = VZVirtioFileSystemDeviceConfiguration(tag: "rosetta")
+    rosetta.share = try VZLinuxRosettaDirectoryShare()
+    config.directorySharingDevices += [rosetta]
+}
+#endif*/
+
+let serial = VZVirtioConsoleDeviceSerialPortConfiguration()
+serial.attachment = VZFileHandleSerialPortAttachment(
+    fileHandleForReading: FileHandle.standardInput,
+    fileHandleForWriting: FileHandle.standardOutput
+)
+config.serialPorts = [serial]
+
+do {
+    try config.validate()
+} catch {
+    fatalError("Virtual Machine Config Error: \(error)")
+}
+let vm = VZVirtualMachine(configuration: config)
+class VMDelegate : NSObject, VZVirtualMachineDelegate {
+    func guestDidStop(_ virtualMachine: VZVirtualMachine) {
+        if verbose { NSLog("Virtual Machine Stopped") }
+        exit(0)
+    }
+
+    func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {
+        fatalError("Virtual Machine Run Error: \(error)")
+    }
+}
+let delegate = VMDelegate()
+vm.delegate = delegate
+vm.start { result in
+    switch result {
+    case .success:
+        if verbose { NSLog("Virtual Machine Started") }
+    case let .failure(error):
+        fatalError("Virtual Machine Start Error: \(error)")
+    }
+}
+let pid = String(getpid())
+fileManager.createFile(atPath: "pidfile", contents: pid.data(using: .utf8))
+
+NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.didWakeNotification, object: nil, queue: nil,
+      using: { _ in
+
+            })
+
+dispatchMain()

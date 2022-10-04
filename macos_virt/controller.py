@@ -22,9 +22,10 @@ import configparser
 import platform
 from .downloader import download
 
-from macos_virt.constants import DISK_FILENAME, BOOT_DISK_FILENAME
-
 MODULE_PATH = os.path.dirname(__file__)
+
+DISK_FILENAME = "root.img"
+BOOT_DISK_FILENAME = "boot.img"
 
 CONTROL_DIRECTORY_NAME = "control_directory"
 BASE_PATH = os.path.join(xdg.xdg_config_home(), "macos-virt2")
@@ -41,6 +42,7 @@ KEY_PATH_PUBLIC = os.path.join(
 )
 
 RUNNER_PATH = os.path.join(MODULE_PATH, "macos_virt_runner/macos_virt_runner")
+SERVICE_PATH = os.path.join(MODULE_PATH, "service.sh")
 RUNNER_PATH_ENTITLEMENTS = os.path.join(
     MODULE_PATH, "macos_virt_runner/" "macos_virt_runner.entitlements"
 )
@@ -140,15 +142,25 @@ class VMManager:
         self.save_configuration_to_disk()
         self.provision()
 
-    def is_provisioned(self):
-        return self.configuration.get("status") == "running"
-
     def read_control_file(self, filename):
         try:
             with open(os.path.join(self.control_directory, filename)) as f:
                 return f.read()
         except FileNotFoundError:
             return ""
+
+    def print_realtime_status(self):
+        heartbeat = self.read_control_file("heartbeat")
+        stats = { x.split(": ")[0]: x.split(": ")[1]+"%"
+                  for x in heartbeat.split("\n")  if x}
+        tab = Table()
+        tab.add_column("Name")
+        tab.add_column("IP")
+        for header in stats.keys():
+            tab.add_column(header)
+        tab.add_row(self.name, self.get_ip_address(), *list(stats.values()))
+        console.print(tab)
+        return
 
     def get_ip_address(self):
         return self.read_control_file("ip").strip().split("\n")[-1]
@@ -230,10 +242,6 @@ class VMManager:
         with open(vm_disk, "ba") as f:
             for _ in track(range(chunks), description="Expanding Root Image..."):
                 f.write(mb_padding)
-        ssh_key = self.get_ssh_public_key()
-        os.mkdir(self.control_directory)
-        with open(os.path.join(self.control_directory, "ssh_key"), "w") as f:
-            f.write(ssh_key)
 
         self.boot_normally()
 
@@ -247,6 +255,12 @@ class VMManager:
         except gzip.BadGzipFile:
             pass
 
+        shutil.rmtree(self.control_directory, ignore_errors=True)
+        os.mkdir(self.control_directory)
+        shutil.copy(SERVICE_PATH, os.path.join(self.control_directory, "service.sh"))
+        ssh_key = self.get_ssh_public_key()
+        with open(os.path.join(self.control_directory, "ssh_key"), "w") as f:
+            f.write(ssh_key)
         check_output(
             [
                 "codesign",
@@ -258,64 +272,47 @@ class VMManager:
                 RUNNER_PATH,
             ]
         )
-        arguments = [
-            RUNNER_PATH,
-            "--pidfile=./pidfile",
-            f"--kernel={kernel}",
-            f"--cmdline={cmdline}",
-            f"--control-directory={CONTROL_DIRECTORY_NAME}",
-            f"--disk={DISK_FILENAME}",
-            f"--disk={BOOT_DISK_FILENAME}",
-            f"--network={self.configuration['mac_address']}@nat",
-            f"--cpu-count={self.configuration['cpus']}",
-            f"--memory-size={self.configuration['memory']}",
-            "--console-symlink=console",
-        ]
+        boot_config = {}
+        boot_config["kernel"] = kernel
+        boot_config["mac"] = self.configuration['mac_address']
+        boot_config["cpus"] = self.configuration['cpus']
+        boot_config["memory"] = self.configuration['memory']
+        boot_config["share_home"] = False
         if initrd:
-            arguments.append(f"--initrd={initrd}",)
-
+            boot_config["initrd"] = initrd
+        if cmdline:
+            boot_config["cmdline"] = cmdline
         if self.configuration.get("mount_home_directory", False):
             with open(os.path.join(self.control_directory, "mnt_usr_directory"), "w") as f:
                 f.write(os.path.expanduser('~'))
-            arguments.append("--home_dir_share=true")
+            boot_config["share_home"] = True
         else:
             try:
                 os.remove(os.path.join(self.control_directory, "mnt_usr_directory"))
-                arguments.append("--home_dir_share=false")
             except OSError:
                 pass
-        subprocess.Popen(arguments, cwd=self.vm_directory)
-        time.sleep(1)
+
+        with open(os.path.join(self.vm_directory, "boot_config.json"), "w") as f:
+            json.dump(boot_config, f)
+
         subprocess.run(
-            f"/usr/bin/screen -dm -S console-{self.name} {self.vm_directory}/console",
+            f"/usr/bin/screen -S console-{self.name} -dm sh -c '{RUNNER_PATH}'",
             shell=True,
+            cwd=self.vm_directory
         )
+        for x in range(0, 30):
+            if self.get_ip_address():
+                text = ":hatched_chick: VM is booted."
+                console.print(text)
+                return
+            time.sleep(0.5)
+        text = ":rotating_light: VM had a problem initializing"
+        console.print(text)
 
     def save_configuration_to_disk(self):
         with open(os.path.join(self.vm_directory, "vm.json"), "w") as f:
             json.dump(self.configuration, f)
 
-    def update_vm_status(self, status):
-        status_string = status["status"]
-        if status_string == "initializing":
-            text = ":hatching_chick: VM has made first contact"
-            console.print(text)
-        if status_string == "initialization_complete":
-            text = ":hatched_chick: Initialization complete"
-            console.print(text)
-        if status_string == "initialization_error":
-            text = ":rotating_light: VM had a problem initializing"
-            console.print(text)
-        self.configuration["status"] = status_string
-        self.save_configuration_to_disk()
-        if status_string == "running":
-            self.format_status(status)
-            if "network_addresses" in status:
-                for address, netmask in status["network_addresses"]:
-                    if address.startswith("192.168"):
-                        self.configuration["ip_address"] = address
-            self.save_configuration_to_disk()
-            return True
 
     def is_running(self):
         try:
@@ -367,10 +364,16 @@ class VMManager:
             with fs.open_fs(f"fat://{vm_boot_disk}?read_only=true") as fat32_boot_disk:
                 vm_boot_disk = self.boot_disk()
                 fat32_boot_disk = fs.open_fs(f"fat://{vm_boot_disk}?read_only=true")
-                kernel_path = \
-                sorted([x.path for x in fat32_boot_disk.glob(config["kernel_glob"])])[0]
-                initrd_path = \
-                sorted([x.path for x in fat32_boot_disk.glob(config["initrd_glob"])])[0]
+                try:
+                    kernel_path = \
+                    sorted([x.path for x in fat32_boot_disk.glob(config["kernel_glob"])])[0]
+                    initrd_path = \
+                    sorted([x.path for x in fat32_boot_disk.glob(config["initrd_glob"])])[0]
+                except IndexError:
+                    console.print(
+                        "Could not load kernel or initrd from the boot disk."
+                    )
+                    return
                 console.print(
                     f":floppy_disk: Booting with Kernel {kernel_path} and"
                     f" Ramdisk {initrd_path} from Boot volume"
