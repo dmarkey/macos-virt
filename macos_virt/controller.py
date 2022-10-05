@@ -22,6 +22,7 @@ import configparser
 import platform
 from .downloader import download
 
+PLATFORM = platform.machine()
 MODULE_PATH = os.path.dirname(__file__)
 
 DISK_FILENAME = "root.img"
@@ -342,7 +343,7 @@ class VMManager:
         latest_kernel_path = os.path.join(GENERIC_KERNELS_PATH, version)
         if not os.path.exists(latest_kernel_path):
             latest_kernel =  [ x for x in latest_release['assets'] if
-                               x['name'] == "vmlinuz" ][0]['browser_download_url']
+                               x['name'] == f"vmlinuz-{PLATFORM}" ][0]['browser_download_url']
             download([{"from": latest_kernel, "to": latest_kernel_path }])
         return latest_kernel_path
 
@@ -351,8 +352,7 @@ class VMManager:
         config.read(os.path.join(self.vm_directory, "boot.cfg"))
         config = config['macos-virt-boot-config']
         cmdline = config['cmdline']
-        if platform.machine() == "arm64" and (
-                config.get("generic_arm64_kernel", "false").lower() == "true"):
+        if config.get(f"generic_{PLATFORM}_kernel", "false").lower() == "true":
             kernel_path = self.get_generic_kernel()
             console.print(
                 f":floppy_disk: Booting with generic arm64 kernel {kernel_path}"
