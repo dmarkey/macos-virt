@@ -129,8 +129,7 @@ class VMManager:
             "cpus": cpus,
             "package": package,
             "disk_size": disk_size,
-            "ip_address": None,
-            "status": "uninitialized",
+            "status": "unprovisioned",
             "mount_home_directory": mount_home_directory,
             "mac_address": "52:54:00:%02x:%02x:%02x"
                            % (
@@ -139,8 +138,6 @@ class VMManager:
                                random.randint(0, 255),
                            ),
         }
-        pathlib.Path(self.vm_directory).mkdir(parents=True)
-        self.save_configuration_to_disk()
         self.provision()
 
     def read_control_file(self, filename):
@@ -221,29 +218,31 @@ class VMManager:
         console.print(f":sleeping: Stop request sent to {self.name}")
 
     def provision(self):
-        vm_directory = self.vm_directory
-        download([{"from": self.configuration['package'], "to": os.path.join(
-            self.vm_directory, "package.tar.gz")}])
-        source = request.urlopen(self.configuration['package'])
-        dest = os.path.join(vm_directory, "package.tar.gz")
-        with Progress() as progress:
-            progress.add_task(
-                "Extracting Files for VM", total=100, start=False
-            )
-            tf = tarfile.open(dest)
-            tf.extract("root.img", path=vm_directory)
-            tf.extract("boot.img", path=vm_directory)
-            tf.extract("boot.cfg", path=vm_directory)
-            tf.close()
-            os.unlink(dest)
-        vm_disk = os.path.join(vm_directory, "root.img")
-        mb_padding = b"\0" * MB
-        size = os.path.getsize(vm_disk)
-        chunks = int(((MB * self.configuration["disk_size"]) - size) / MB)
-        with open(vm_disk, "ba") as f:
-            for _ in track(range(chunks), description="Expanding Root Image..."):
-                f.write(mb_padding)
+        with tempfile.TemporaryDirectory() as tmp_directory:
+            download([{"from": self.configuration['package'], "to": os.path.join(
+                tmp_directory, "package.tar.gz")}])
+            source = request.urlopen(self.configuration['package'])
+            dest = os.path.join(tmp_directory, "package.tar.gz")
+            with Progress() as progress:
+                progress.add_task(
+                    "Extracting Files for VM", total=100, start=False
+                )
+                tf = tarfile.open(dest)
+                tf.extract("root.img", path=tmp_directory)
+                tf.extract("boot.img", path=tmp_directory)
+                tf.extract("boot.cfg", path=tmp_directory)
+                tf.close()
+                os.unlink(dest)
+            vm_disk = os.path.join(tmp_directory, "root.img")
+            mb_padding = b"\0" * MB
+            size = os.path.getsize(vm_disk)
+            chunks = int(((MB * self.configuration["disk_size"]) - size) / MB)
+            with open(vm_disk, "ba") as f:
+                for _ in track(range(chunks), description="Expanding Root Image..."):
+                    f.write(mb_padding)
 
+            shutil.move(tmp_directory, self.vm_directory)
+            self.save_configuration_to_disk()
         self.boot_normally()
 
     def boot_vm(self, kernel, initrd=None, cmdline=None):
